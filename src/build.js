@@ -31,6 +31,7 @@ ${read('style.css')}</style>
 <button data-tab="log">Log</button>
 <button data-tab="subjects">Subjects</button>
 </nav>
+<div id="pomobar" hidden></div>
 <script type="application/json" id="app-state"></script>
 <script>
 ${read('seed.js')}

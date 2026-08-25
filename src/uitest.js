@@ -39,7 +39,19 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
     ok(/1600/.test(await page.locator('.goalbar').innerText()), 'SAT 1600 goal line visible');
     ok(/\d+\/\d+ done/.test(await page.locator('.daysum').innerText()), 'day summary line');
     ok(/min/.test(await page.locator('#bars .weektotal').innerText()), 'weekly pace line');
+    await page.click('[data-tab="log"]');
+    ok((await page.locator('#test-list').innerText()).includes('English IO'),
+      'the seeded English IO is already in the test list');
+    await page.click('[data-tab="today"]');
     ok(errors.length === 0, 'console errors: ' + errors.join(' | '));
+  });
+
+  await t('pomodoro starts at 25:00 and stops cleanly', async () => {
+    await page.locator('.pomo-btn').first().click();
+    ok(await page.locator('#pomobar').isVisible(), 'pomodoro bar visible');
+    ok(/2[45]:\d\d/.test(await page.locator('#pomobar').innerText()), 'counting down from 25');
+    await page.click('#pomo-stop');
+    ok(!(await page.locator('#pomobar').isVisible()), 'bar hidden after stop');
   });
 
   await t('ticking and unticking a block updates progress and log', async () => {
@@ -117,7 +129,7 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
     await page.locator('#test-topics .chip').nth(1).click();
     await page.click('#test-form button[type="submit"]');
     await page.waitForSelector('.test-item');
-    ok(/in 2d/.test(await page.locator('.test-item .chip-dt').first().innerText()), 'countdown chip');
+    ok((await page.locator('#test-list').innerText()).includes('in 2d'), 'countdown chip');
     await page.click('[data-tab="today"]');
     await gotoWeekday();
     const first = await page.locator('.block.kind-flex .b-title').first().innerText();

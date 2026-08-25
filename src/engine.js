@@ -5,6 +5,8 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 
   var TIER_W = { 1: 1, 2: 0.72, 3: 0.45 };
+  // weekend deep-work bias: math ≈ physics on top, econ next, chem unchanged
+  var WEEKEND_W = { math: 1.35, phys: 1.35, econ: 1.3 };
   var KIND = { math: 'analytical', phys: 'analytical', chem: 'analytical', peak: 'project', sat: 'project' };
   // [multiplier on the first flex block of the day, multiplier on the last]
   var PLACEMENT = { analytical: [1.35, 0.75], project: [0.60, 1.40], neutral: [1, 1] };
@@ -41,6 +43,17 @@
   }
 
   // ---- weighting ----
+  // nearest test still ahead of tonight's study blocks; a test sat earlier today
+  // (dt = 0) is over and must not shadow the next one
+  function nextTestDt(state, subjectId, dateISO) {
+    var best = null;
+    state.tests.forEach(function (t) {
+      if (t.subjectId !== subjectId) return;
+      var dt = daysBetween(dateISO, t.date);
+      if (dt >= 1 && (best === null || dt < best)) best = dt;
+    });
+    return best;
+  }
   function subjectWeight(state, subject, dateISO) {
     var remedial = 0, gradeMult = 1;
     state.grades.forEach(function (g) {
@@ -54,13 +67,12 @@
     remedial = Math.min(180, remedial);
     gradeMult = Math.min(2.6, gradeMult);
 
-    var testDt = null;
-    state.tests.forEach(function (t) {
-      if (t.subjectId !== subject.id) return;
-      var dt = daysBetween(dateISO, t.date);
-      if (dt >= 0 && (testDt === null || dt < testDt)) testDt = dt;
-    });
-    var testMult = testDt === null ? 1 : testDt <= 2 ? 3.0 : testDt <= 5 ? 2.2 : testDt <= 10 ? 1.6 : testDt <= 14 ? 1.25 : 1;
+    var testDt = nextTestDt(state, subject.id, dateISO);
+    // day-of gets neither boost nor prep: by study time the test has been sat
+    var testMult = testDt === null || testDt < 1 ? 1 :
+      testDt <= 2 ? 3.0 : testDt <= 5 ? 2.2 : testDt <= 10 ? 1.6 : testDt <= 14 ? 1.25 : 1;
+    var prep = testDt === null || testDt < 1 ? 0 :
+      testDt <= 2 ? 180 : testDt <= 5 ? 120 : testDt <= 10 ? 60 : 0;
 
     var total = 0, shaky = 0;
     state.topics.forEach(function (tp) {
@@ -71,16 +83,17 @@
 
     var sd = schoolDay(dateISO); // consolidate what was taught in class today
     var classMult = sd && CLASS_DAYS[sd].indexOf(subject.id) >= 0 ? 1.2 : 1;
+    var wkndMult = dow(dateISO) >= 5 ? (WEEKEND_W[subject.id] || 1) : 1;
     var effWeight = TIER_W[subject.tier] * (subject.priority || 1); // e.g. chem: 0.72 × 1.25
-    var target = subject.weeklyMinutes + remedial;
+    var target = subject.weeklyMinutes + remedial + prep; // assessments add minutes, like grades do
     var done = minutesThisWeek(state, subject.id, dateISO);
     var remaining = Math.max(0, target - done);
     var mult = Math.min(3.5, testMult * gradeMult * shakyMult);
     return {
-      remedial: remedial, target: target, done: done, remaining: remaining,
+      remedial: remedial, prep: prep, target: target, done: done, remaining: remaining,
       testMult: testMult, gradeMult: gradeMult, shakyMult: shakyMult, testDt: testDt,
-      classMult: classMult, mult: mult, effWeight: effWeight,
-      score: (remaining / 60 + 0.1) * mult * effWeight * classMult
+      classMult: classMult, wkndMult: wkndMult, mult: mult, effWeight: effWeight,
+      score: (remaining / 60 + 0.1) * mult * effWeight * classMult * wkndMult
     };
   }
 
@@ -96,8 +109,12 @@
   function allocationPool(state, dateISO) {
     var locked = tier3Locked(state, dateISO);
     return state.subjects.filter(function (s) {
+      if (s.id === 'peak') return false; // fixed daily half hour, never competes for flex
       if (s.id === 'sat' && state.settings.satDone) return false;
-      if (s.tier === 3 && locked) return false;
+      if (s.tier === 3 && locked) {
+        var dt = nextTestDt(state, s.id, dateISO); // an imminent assessment beats the ladder
+        return dt !== null && dt <= 10;
+      }
       return true;
     });
   }
@@ -121,16 +138,19 @@
       { time: '16:00', minutes: 90, kind: 'flex' },
       { time: '17:50', minutes: 70, kind: 'flex' },
       { time: '19:45', minutes: 60, kind: 'flex' },
-      { time: '20:45', minutes: 20, kind: 'errlog' }];
+      { time: '20:45', minutes: 30, kind: 'peak' },
+      { time: '21:15', minutes: 20, kind: 'errlog' }];
     if (d === 5) return [ // weekends are the chance to get ahead
       { time: '08:00', minutes: 135, kind: 'test' },
       { time: '10:45', minutes: 100, kind: 'flex' },
-      { time: '14:00', minutes: 120, kind: 'flex' }];
+      { time: '14:00', minutes: 120, kind: 'flex' },
+      { time: '16:15', minutes: 30, kind: 'peak' }];
     return [
       { time: '09:00', minutes: 120, kind: 'autopsy' },
       { time: '11:00', minutes: 60, kind: 'review' },
       { time: '14:00', minutes: 90, kind: 'flex' },
-      { time: '16:30', minutes: 60, kind: 'flex' }];
+      { time: '16:30', minutes: 60, kind: 'flex' },
+      { time: '17:45', minutes: 30, kind: 'peak' }];
   }
 
   // ---- topic choice ----
@@ -141,7 +161,7 @@
     state.tests.forEach(function (t) {
       if (t.subjectId !== subjectId) return;
       var dt = daysBetween(dateISO, t.date);
-      if (dt >= 0 && dt <= 10) (t.topicIds || []).forEach(function (id) { named[id] = true; });
+      if (dt >= 1 && dt <= 10) (t.topicIds || []).forEach(function (id) { named[id] = true; });
     });
     var lru = function (a, b) {
       var x = a.lastStudied || '', y = b.lastStudied || '';
@@ -184,14 +204,19 @@
     },
     peak: { any: 'Ship one concrete improvement end-to-end, then log what moved' }
   };
-  function instructionFor(subjectId, status) {
+  var ORAL_INSTR = {
+    port: 'Ensaio completo do oral, cronometrado — grave-se e corrija pelos critérios',
+    any: 'Full timed run of the oral — record yourself, then mark it against the criteria'
+  };
+  function instructionFor(subjectId, status, topicName) {
+    if (topicName && /oral/i.test(topicName)) return ORAL_INSTR[subjectId] || ORAL_INSTR.any;
     var s = SPECIAL_INSTR[subjectId];
     return s ? (s.any || s[status] || DEFAULT_INSTR[status]) : DEFAULT_INSTR[status];
   }
 
   function reasonFor(w, topic, dateISO) {
     var r = [];
-    if (w.testDt !== null && w.testDt <= 14) r.push('test in ' + w.testDt + 'd');
+    if (w.testDt !== null && w.testDt >= 1 && w.testDt <= 14) r.push('test in ' + w.testDt + 'd');
     if (w.remedial > 0) r.push('grade below target · +' + Math.round(w.remedial) + ' min');
     if (dow(dateISO) >= 3 && w.remaining / w.target > 0.5) r.push('behind weekly target');
     if (!r.length && topic && topic.status === 'shaky') r.push('shaky topic');
@@ -235,6 +260,17 @@
         }
         return;
       }
+      if (b.kind === 'peak') { // the fixed daily half hour
+        b.subjectId = 'peak';
+        var pin0 = logByKey[b.key];
+        if (pin0 && pin0.subjectId) b.done = true;
+        var ptp = pin0 && pin0.topicId ? topicById[pin0.topicId] : pickTopic(state, 'peak', dateISO, used);
+        if (ptp) { b.topicId = ptp.id; used.add(ptp.id); }
+        b.title = 'PeakScore — ' + (ptp ? ptp.name : 'daily 30');
+        b.instruction = 'Timeboxed half hour: ship one small thing, then stop. School owns the rest.';
+        addPlan('peak', b.minutes);
+        return;
+      }
       if (b.kind !== 'test') return;
       var pin = logByKey[b.key];
       if (pin && pin.subjectId) { b.subjectId = pin.subjectId; b.done = true; }
@@ -265,7 +301,7 @@
       b.done = true; b.subjectId = pin.subjectId; b.topicId = pin.topicId || undefined;
       var tp = pin.topicId && topicById[pin.topicId];
       b.title = byId[pin.subjectId].name + (tp ? ' — ' + tp.name : '');
-      b.instruction = tp ? instructionFor(pin.subjectId, tp.status) : '';
+      b.instruction = tp ? instructionFor(pin.subjectId, tp.status, tp.name) : '';
       if (tp) used.add(tp.id);
       addPlan(pin.subjectId, pin.minutes);
     });
@@ -278,9 +314,12 @@
         if (p + b.minutes > DAY_CAP) return;
         var pl = PLACEMENT[KIND[s.id] || 'neutral'];
         var place = pl[0] + (pl[1] - pl[0]) * pos;
+        var w = weights[s.id];
         // test-eve exception: ≤2 days out, urgency overrides the time-of-day penalty
-        if (weights[s.id].testDt !== null && weights[s.id].testDt <= 2 && place < 1) place = 1;
-        var live = weights[s.id].score * place / (1 + p / SPREAD);
+        if (w.testDt !== null && w.testDt <= 2 && place < 1) place = 1;
+        // need shrinks as today's slots fill, so a fed subject stops absorbing surplus
+        var base = (Math.max(0, w.remaining - p) / 60 + 0.1) * w.mult * w.effWeight * w.classMult * w.wkndMult;
+        var live = base * place / (1 + p / SPREAD);
         if (!best || live > best.live) best = { s: s, live: live };
       });
       if (!best) return;
@@ -289,7 +328,7 @@
       b.subjectId = best.s.id;
       b.topicId = topic ? topic.id : undefined;
       b.title = best.s.name + (topic ? ' — ' + topic.name : '');
-      b.instruction = instructionFor(best.s.id, topic ? topic.status : 'learning');
+      b.instruction = instructionFor(best.s.id, topic ? topic.status : 'learning', topic && topic.name);
       b.reason = reasonFor(weights[best.s.id], topic, dateISO);
       addPlan(best.s.id, b.minutes);
     });

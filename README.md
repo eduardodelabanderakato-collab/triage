@@ -13,31 +13,41 @@ No backend, no accounts, no framework, no build step for the user. Open
 | Tier | Contents | Behaviour |
 |------|----------|-----------|
 | 0 | Sleep, soccer, meals, one social block/week | Never scheduled against. Not in the allocation pool. |
-| 1 | Math AA HL, Physics HL, Economics HL, PeakScore | Full weight. Never cut. |
+| 1 | Math AA HL, Physics HL, Economics HL | Full weight. Never cut. |
+| 1* | PeakScore | A fixed 30-minute daily ritual (Tue/Thu/Fri + both weekend days, skipped on soccer days, 150 min/week). Never competes for flex — school owns those — but still gates Tier 3 like any Tier 1 subject. |
 | 2 | Chemistry SL, SAT | Weight ×0.72. Cut when the week is tight. Chemistry carries a ×1.25 priority (effective ≈0.9) — below Physics, above the rest of the tier. |
-| 3 | English SL, Portuguese SL | Weight ×0.45. Locked out entirely while **any** Tier 1 subject is >40% behind its weekly target. |
+| 3 | English SL, Portuguese SL | Weight ×0.45. Locked out entirely while **any** Tier 1 subject is >40% behind its weekly target — **unless** that subject has an assessment ≤10 days away (an imminent IO beats the ladder). |
 
 ## How a day is planned
 
 1. **Template** — fixed by weekday: Mon/Wed are soccer days (flex 45+90+45), Tue/Thu/Fri
-   run flex 90+70+60. Weekends are the get-ahead days: Saturday is a 135-min timed full
-   test + flex 100+120, Sunday a 120-min error autopsy + 60-min weekly review + flex
-   90+60. Floor mode replaces everything with three blocks totalling 25 minutes.
+   run flex 90+70+60 + the PeakScore half hour. Weekends are the get-ahead days:
+   Saturday is a 135-min timed full test + flex 100+120 + PeakScore 30, Sunday a
+   120-min error autopsy + 60-min weekly review + flex 90+60 + PeakScore 30. Floor
+   mode replaces everything with three blocks totalling 25 minutes.
 2. **Weight each subject** (`subjectWeight` in [src/engine.js](src/engine.js)):
 
    ```
    remedial  = Σ over grades ≤21 days old: 30·(7−score)·(1−age/21), capped at 180
-   target    = weeklyMinutes + remedial          ← a bad grade ADDS minutes, not just weight
+   prep      = 180 (test in 1–2d) · 120 (3–5d) · 60 (6–10d) · else 0
+   target    = weeklyMinutes + remedial + prep   ← grades AND assessments add minutes
    remaining = max(0, target − minutes logged this week)
-   testMult  = 3.0 (test ≤2d) · 2.2 (≤5d) · 1.6 (≤10d) · 1.25 (≤14d) · else 1
+   testMult  = 3.0 (test in 1–2d) · 2.2 (≤5d) · 1.6 (≤10d) · 1.25 (≤14d) · else 1
    gradeMult = 1 + Σ 0.22·(7−score)·(1−age/21), capped at 2.6
    shakyMult = 1 + 0.5·(shaky topics / total topics)
    classMult = 1.2 if the subject met in school today (Day 1/Day 2), else 1
+   wkndMult  = Sat/Sun only: math ×1.35 · physics ×1.35 · econ ×1.3 · else 1
    mult      = min(3.5, testMult · gradeMult · shakyMult)
-   score     = (remaining/60 + 0.1) · mult · tierWeight · priority · classMult
+   score     = (remaining/60 + 0.1) · mult · tierWeight · priority · classMult · wkndMult
    ```
    `priority` is an optional per-subject multiplier on the tier weight (only Chemistry
-   uses it today, ×1.25).
+   uses it today, ×1.25). A test **on its own date** contributes nothing — by the time
+   evening blocks start it has been sat, and it never shadows the next upcoming test.
+   As a day's slots are assigned, `remaining` is re-evaluated minus what's already
+   planned, so a nearly-fed subject stops absorbing surplus and free capacity flows
+   back up the ladder. The weekend bias orders *outstanding need* (fresh-week weekend:
+   math and physics take the deep blocks, econ next, chem last); it never forces work
+   on a subject that has already hit its target.
 3. **Placement** — `PLACEMENT` in engine.js interpolates from first to last flex block:
    analytical subjects (math/phys/chem) ×1.35→×0.75, project work (PeakScore/SAT)
    ×0.60→×1.40. Hard problem-solving gets the freshest hour. *Test-eve exception:* ≤2
@@ -48,9 +58,13 @@ No backend, no accounts, no framework, no build step for the user. Open
    shaky → learning → new → solid-past-review-date, least-recently-studied first, no
    repeats within a day.
 5. **Instruction + reason** — task text varies by topic status (with dedicated phrasing
-   for Economics, English, Portuguese, PeakScore); each block carries a short reason
-   chip ("test in 2d", "grade below target · +90 min"). "Behind weekly target" only
-   appears from Thursday when the deficit exceeds 50% — early-week it would be noise.
+   for Economics, English, Portuguese, PeakScore, and oral topics, which get
+   record-yourself run-through instructions); each block carries a short reason chip
+   ("test in 2d", "grade below target · +90 min"). "Behind weekly target" only appears
+   from Thursday when the deficit exceeds 50% — early-week it would be noise.
+
+Every workable block has a **▶ pomodoro** button: 25 minutes focus / 5 break on a
+loop in a gold bar above the tabs, purely visual (no notifications, by design).
 
 Ticking a block writes a real log entry (progress is measured, not self-reported),
 advances a `new` topic to `learning`, and pins the block so later replans don't

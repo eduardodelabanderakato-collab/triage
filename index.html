@@ -100,6 +100,18 @@ input.tick { width: 26px; height: 26px; accent-color: var(--accent); }
 .weektotal { text-align: center; font-size: 12.5px; color: var(--muted);
   padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .weektotal b { color: var(--accent-deep); }
+.pomo-btn { margin-top: 7px; font: 700 11px 'Space Grotesk', sans-serif; color: var(--accent-deep);
+  border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; }
+#pomobar[hidden] { display: none; }
+#pomobar { position: fixed; left: 0; right: 0; z-index: 6;
+  bottom: calc(49px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  background: var(--accent); color: var(--accent-ink);
+  font: 700 14px 'Space Grotesk', sans-serif; }
+#pomobar .pomo-label { flex: 1; font: 500 12px Inter, sans-serif; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+#pomo-stop { border: 2px solid var(--accent-ink); color: var(--accent-ink);
+  border-radius: 99px; padding: 2px 12px; font: 700 12px 'Space Grotesk', sans-serif; }
 .bar-row { margin: 10px 0; }
 .bar-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 4px; }
 .bar-top .warn { color: var(--warn); font-weight: 700; }
@@ -162,6 +174,7 @@ summary::-webkit-details-marker { display: none; }
 <button data-tab="log">Log</button>
 <button data-tab="subjects">Subjects</button>
 </nav>
+<div id="pomobar" hidden></div>
 <script type="application/json" id="app-state"></script>
 <script>
 /* seed.js — subjects and the full topic list. UMD: node module + browser global. */
@@ -174,7 +187,7 @@ summary::-webkit-details-marker { display: none; }
     { id: 'math', name: 'Math AA HL',      level: 'HL', tier: 1, weeklyMinutes: 210, quota: 210, sources: ['RV Gold'] },
     { id: 'phys', name: 'Physics HL',      level: 'HL', tier: 1, weeklyMinutes: 180, quota: 180, sources: ['RV Gold'] },
     { id: 'econ', name: 'Economics HL',    level: 'HL', tier: 1, weeklyMinutes: 105, quota: 105, sources: ['RV Gold'] },
-    { id: 'peak', name: 'PeakScore',       level: '—',  tier: 1, weeklyMinutes: 300, quota: 300, sources: [] },
+    { id: 'peak', name: 'PeakScore',       level: '—',  tier: 1, weeklyMinutes: 150, quota: 150, sources: [] },
     { id: 'chem', name: 'Chemistry SL',    level: 'SL', tier: 2, weeklyMinutes: 140, quota: 140, priority: 1.25, sources: ['RV Gold'] },
     { id: 'sat',  name: 'SAT',             level: '—',  tier: 2, weeklyMinutes: 240, quota: 240, sources: ['Bluebook', 'Erica Meltzer'] },
     { id: 'eng',  name: 'English A SL',    level: 'SL', tier: 3, weeklyMinutes: 45,  quota: 45,  sources: [] },
@@ -270,6 +283,8 @@ summary::-webkit-details-marker { display: none; }
 })(typeof self !== 'undefined' ? self : this, function () {
 
   var TIER_W = { 1: 1, 2: 0.72, 3: 0.45 };
+  // weekend deep-work bias: math ≈ physics on top, econ next, chem unchanged
+  var WEEKEND_W = { math: 1.35, phys: 1.35, econ: 1.3 };
   var KIND = { math: 'analytical', phys: 'analytical', chem: 'analytical', peak: 'project', sat: 'project' };
   // [multiplier on the first flex block of the day, multiplier on the last]
   var PLACEMENT = { analytical: [1.35, 0.75], project: [0.60, 1.40], neutral: [1, 1] };
@@ -306,6 +321,17 @@ summary::-webkit-details-marker { display: none; }
   }
 
   // ---- weighting ----
+  // nearest test still ahead of tonight's study blocks; a test sat earlier today
+  // (dt = 0) is over and must not shadow the next one
+  function nextTestDt(state, subjectId, dateISO) {
+    var best = null;
+    state.tests.forEach(function (t) {
+      if (t.subjectId !== subjectId) return;
+      var dt = daysBetween(dateISO, t.date);
+      if (dt >= 1 && (best === null || dt < best)) best = dt;
+    });
+    return best;
+  }
   function subjectWeight(state, subject, dateISO) {
     var remedial = 0, gradeMult = 1;
     state.grades.forEach(function (g) {
@@ -319,13 +345,12 @@ summary::-webkit-details-marker { display: none; }
     remedial = Math.min(180, remedial);
     gradeMult = Math.min(2.6, gradeMult);
 
-    var testDt = null;
-    state.tests.forEach(function (t) {
-      if (t.subjectId !== subject.id) return;
-      var dt = daysBetween(dateISO, t.date);
-      if (dt >= 0 && (testDt === null || dt < testDt)) testDt = dt;
-    });
-    var testMult = testDt === null ? 1 : testDt <= 2 ? 3.0 : testDt <= 5 ? 2.2 : testDt <= 10 ? 1.6 : testDt <= 14 ? 1.25 : 1;
+    var testDt = nextTestDt(state, subject.id, dateISO);
+    // day-of gets neither boost nor prep: by study time the test has been sat
+    var testMult = testDt === null || testDt < 1 ? 1 :
+      testDt <= 2 ? 3.0 : testDt <= 5 ? 2.2 : testDt <= 10 ? 1.6 : testDt <= 14 ? 1.25 : 1;
+    var prep = testDt === null || testDt < 1 ? 0 :
+      testDt <= 2 ? 180 : testDt <= 5 ? 120 : testDt <= 10 ? 60 : 0;
 
     var total = 0, shaky = 0;
     state.topics.forEach(function (tp) {
@@ -336,16 +361,17 @@ summary::-webkit-details-marker { display: none; }
 
     var sd = schoolDay(dateISO); // consolidate what was taught in class today
     var classMult = sd && CLASS_DAYS[sd].indexOf(subject.id) >= 0 ? 1.2 : 1;
+    var wkndMult = dow(dateISO) >= 5 ? (WEEKEND_W[subject.id] || 1) : 1;
     var effWeight = TIER_W[subject.tier] * (subject.priority || 1); // e.g. chem: 0.72 × 1.25
-    var target = subject.weeklyMinutes + remedial;
+    var target = subject.weeklyMinutes + remedial + prep; // assessments add minutes, like grades do
     var done = minutesThisWeek(state, subject.id, dateISO);
     var remaining = Math.max(0, target - done);
     var mult = Math.min(3.5, testMult * gradeMult * shakyMult);
     return {
-      remedial: remedial, target: target, done: done, remaining: remaining,
+      remedial: remedial, prep: prep, target: target, done: done, remaining: remaining,
       testMult: testMult, gradeMult: gradeMult, shakyMult: shakyMult, testDt: testDt,
-      classMult: classMult, mult: mult, effWeight: effWeight,
-      score: (remaining / 60 + 0.1) * mult * effWeight * classMult
+      classMult: classMult, wkndMult: wkndMult, mult: mult, effWeight: effWeight,
+      score: (remaining / 60 + 0.1) * mult * effWeight * classMult * wkndMult
     };
   }
 
@@ -361,8 +387,12 @@ summary::-webkit-details-marker { display: none; }
   function allocationPool(state, dateISO) {
     var locked = tier3Locked(state, dateISO);
     return state.subjects.filter(function (s) {
+      if (s.id === 'peak') return false; // fixed daily half hour, never competes for flex
       if (s.id === 'sat' && state.settings.satDone) return false;
-      if (s.tier === 3 && locked) return false;
+      if (s.tier === 3 && locked) {
+        var dt = nextTestDt(state, s.id, dateISO); // an imminent assessment beats the ladder
+        return dt !== null && dt <= 10;
+      }
       return true;
     });
   }
@@ -386,16 +416,19 @@ summary::-webkit-details-marker { display: none; }
       { time: '16:00', minutes: 90, kind: 'flex' },
       { time: '17:50', minutes: 70, kind: 'flex' },
       { time: '19:45', minutes: 60, kind: 'flex' },
-      { time: '20:45', minutes: 20, kind: 'errlog' }];
+      { time: '20:45', minutes: 30, kind: 'peak' },
+      { time: '21:15', minutes: 20, kind: 'errlog' }];
     if (d === 5) return [ // weekends are the chance to get ahead
       { time: '08:00', minutes: 135, kind: 'test' },
       { time: '10:45', minutes: 100, kind: 'flex' },
-      { time: '14:00', minutes: 120, kind: 'flex' }];
+      { time: '14:00', minutes: 120, kind: 'flex' },
+      { time: '16:15', minutes: 30, kind: 'peak' }];
     return [
       { time: '09:00', minutes: 120, kind: 'autopsy' },
       { time: '11:00', minutes: 60, kind: 'review' },
       { time: '14:00', minutes: 90, kind: 'flex' },
-      { time: '16:30', minutes: 60, kind: 'flex' }];
+      { time: '16:30', minutes: 60, kind: 'flex' },
+      { time: '17:45', minutes: 30, kind: 'peak' }];
   }
 
   // ---- topic choice ----
@@ -406,7 +439,7 @@ summary::-webkit-details-marker { display: none; }
     state.tests.forEach(function (t) {
       if (t.subjectId !== subjectId) return;
       var dt = daysBetween(dateISO, t.date);
-      if (dt >= 0 && dt <= 10) (t.topicIds || []).forEach(function (id) { named[id] = true; });
+      if (dt >= 1 && dt <= 10) (t.topicIds || []).forEach(function (id) { named[id] = true; });
     });
     var lru = function (a, b) {
       var x = a.lastStudied || '', y = b.lastStudied || '';
@@ -449,14 +482,19 @@ summary::-webkit-details-marker { display: none; }
     },
     peak: { any: 'Ship one concrete improvement end-to-end, then log what moved' }
   };
-  function instructionFor(subjectId, status) {
+  var ORAL_INSTR = {
+    port: 'Ensaio completo do oral, cronometrado — grave-se e corrija pelos critérios',
+    any: 'Full timed run of the oral — record yourself, then mark it against the criteria'
+  };
+  function instructionFor(subjectId, status, topicName) {
+    if (topicName && /oral/i.test(topicName)) return ORAL_INSTR[subjectId] || ORAL_INSTR.any;
     var s = SPECIAL_INSTR[subjectId];
     return s ? (s.any || s[status] || DEFAULT_INSTR[status]) : DEFAULT_INSTR[status];
   }
 
   function reasonFor(w, topic, dateISO) {
     var r = [];
-    if (w.testDt !== null && w.testDt <= 14) r.push('test in ' + w.testDt + 'd');
+    if (w.testDt !== null && w.testDt >= 1 && w.testDt <= 14) r.push('test in ' + w.testDt + 'd');
     if (w.remedial > 0) r.push('grade below target · +' + Math.round(w.remedial) + ' min');
     if (dow(dateISO) >= 3 && w.remaining / w.target > 0.5) r.push('behind weekly target');
     if (!r.length && topic && topic.status === 'shaky') r.push('shaky topic');
@@ -500,6 +538,17 @@ summary::-webkit-details-marker { display: none; }
         }
         return;
       }
+      if (b.kind === 'peak') { // the fixed daily half hour
+        b.subjectId = 'peak';
+        var pin0 = logByKey[b.key];
+        if (pin0 && pin0.subjectId) b.done = true;
+        var ptp = pin0 && pin0.topicId ? topicById[pin0.topicId] : pickTopic(state, 'peak', dateISO, used);
+        if (ptp) { b.topicId = ptp.id; used.add(ptp.id); }
+        b.title = 'PeakScore — ' + (ptp ? ptp.name : 'daily 30');
+        b.instruction = 'Timeboxed half hour: ship one small thing, then stop. School owns the rest.';
+        addPlan('peak', b.minutes);
+        return;
+      }
       if (b.kind !== 'test') return;
       var pin = logByKey[b.key];
       if (pin && pin.subjectId) { b.subjectId = pin.subjectId; b.done = true; }
@@ -530,7 +579,7 @@ summary::-webkit-details-marker { display: none; }
       b.done = true; b.subjectId = pin.subjectId; b.topicId = pin.topicId || undefined;
       var tp = pin.topicId && topicById[pin.topicId];
       b.title = byId[pin.subjectId].name + (tp ? ' — ' + tp.name : '');
-      b.instruction = tp ? instructionFor(pin.subjectId, tp.status) : '';
+      b.instruction = tp ? instructionFor(pin.subjectId, tp.status, tp.name) : '';
       if (tp) used.add(tp.id);
       addPlan(pin.subjectId, pin.minutes);
     });
@@ -543,9 +592,12 @@ summary::-webkit-details-marker { display: none; }
         if (p + b.minutes > DAY_CAP) return;
         var pl = PLACEMENT[KIND[s.id] || 'neutral'];
         var place = pl[0] + (pl[1] - pl[0]) * pos;
+        var w = weights[s.id];
         // test-eve exception: ≤2 days out, urgency overrides the time-of-day penalty
-        if (weights[s.id].testDt !== null && weights[s.id].testDt <= 2 && place < 1) place = 1;
-        var live = weights[s.id].score * place / (1 + p / SPREAD);
+        if (w.testDt !== null && w.testDt <= 2 && place < 1) place = 1;
+        // need shrinks as today's slots fill, so a fed subject stops absorbing surplus
+        var base = (Math.max(0, w.remaining - p) / 60 + 0.1) * w.mult * w.effWeight * w.classMult * w.wkndMult;
+        var live = base * place / (1 + p / SPREAD);
         if (!best || live > best.live) best = { s: s, live: live };
       });
       if (!best) return;
@@ -554,7 +606,7 @@ summary::-webkit-details-marker { display: none; }
       b.subjectId = best.s.id;
       b.topicId = topic ? topic.id : undefined;
       b.title = best.s.name + (topic ? ' — ' + topic.name : '');
-      b.instruction = instructionFor(best.s.id, topic ? topic.status : 'learning');
+      b.instruction = instructionFor(best.s.id, topic ? topic.status : 'learning', topic && topic.name);
       b.reason = reasonFor(weights[best.s.id], topic, dateISO);
       addPlan(best.s.id, b.minutes);
     });
@@ -604,9 +656,21 @@ summary::-webkit-details-marker { display: none; }
     var d = new Date(), p = function (x) { return (x < 10 ? '0' : '') + x; };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
+  // known real-world assessments, injected once so they never need manual entry
+  var EVENTS = [
+    { id: 'evt-phys-test-0825', subjectId: 'phys', date: '2026-08-25', topicIds: [], note: 'Physics test 13:30' },
+    { id: 'evt-eng-io', subjectId: 'eng', date: '2026-08-27', topicIds: ['eng-6', 'eng-7'], note: 'English IO — adjust the date if needed' }
+  ];
   function normalize(s) { // upgrades for states saved by older versions
     if (s.settings.satTarget === 1550) s.settings.satTarget = 1600;
     if (!s.settings.satDeadline) s.settings.satDeadline = '2026-12-18';
+    s.settings.seededEvents = s.settings.seededEvents || [];
+    EVENTS.forEach(function (ev) { // once each; deleting one in the Log tab sticks
+      if (ev.date >= todayISO() && s.settings.seededEvents.indexOf(ev.id) < 0) {
+        s.tests.push(ev);
+        s.settings.seededEvents.push(ev.id);
+      }
+    });
     Seed.SUBJECTS.forEach(function (def) { // subject tunables follow the code, data stays
       var mine = s.subjects.find(function (x) { return x.id === def.id; });
       if (mine) {
@@ -620,9 +684,10 @@ summary::-webkit-details-marker { display: none; }
     var s;
     try { s = JSON.parse($('#app-state').textContent); if (s && s.version) return normalize(s); } catch (e) {}
     try { s = JSON.parse(localStorage.getItem(STORE)); if (s && s.version) return normalize(s); } catch (e) {}
-    return Seed.seedState();
+    return normalize(Seed.seedState());
   }
   var state = load();
+  save(); // persist normalization (seeded events, migrated tunables) right away
   var cur = { tab: 'today', offset: 0 };
   function save() {
     var json = JSON.stringify(state).replace(/</g, '\\u003c'); // keep the JSON inert inside its <script> tag
@@ -660,6 +725,8 @@ summary::-webkit-details-marker { display: none; }
         ' min</div><div class="b-title">' + esc(b.title) + '</div>' +
         (b.instruction ? '<div class="b-instr">' + esc(b.instruction) + '</div>' : '') +
         (b.reason ? '<div class="b-reason">' + esc(b.reason) + '</div>' : '') +
+        (done || b.kind === 'soccer' || b.kind === 'recall' || b.kind === 'errlog' ? '' :
+          '<button type="button" class="pomo-btn" data-label="' + esc(b.title) + '">▶ pomodoro</button>') +
         (b.kind === 'soccer' ? '' : '<label class="tickwrap"><input type="checkbox" class="tick" data-key="' +
           b.key + '"' + (done ? ' checked' : '') +
           ' aria-label="Done: ' + esc(b.title) + ' at ' + b.time + '"></label>') + '</div>';
@@ -675,9 +742,10 @@ summary::-webkit-details-marker { display: none; }
         var w = Engine.subjectWeight(state, s, date);
         tt += w.target; td += w.done;
         var pct = Math.min(100, Math.round(100 * w.done / w.target));
+        var boost = w.remedial + w.prep; // raised target: bad grade and/or upcoming test
         return '<div class="bar-row" data-subject="' + s.id + '"><div class="bar-top"><span>' + esc(s.name) +
-          '</span><span' + (w.remedial > 0 ? ' class="warn"' : '') + '>' + w.done + ' / ' +
-          Math.round(w.target) + ' min' + (w.remedial > 0 ? ' (+' + Math.round(w.remedial) + ')' : '') +
+          '</span><span' + (boost > 0 ? ' class="warn"' : '') + '>' + w.done + ' / ' +
+          Math.round(w.target) + ' min' + (boost > 0 ? ' (+' + Math.round(boost) + ')' : '') +
           '</span></div><div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>';
       }).join('');
     var weektotal = '<div class="weektotal"><b>' + td + '</b> / ' + Math.round(tt) +
@@ -764,6 +832,39 @@ summary::-webkit-details-marker { display: none; }
     }).join('');
   }
 
+  // ---- pomodoro: 25 focus / 5 break, visual only, one at a time ----
+  var pomo = null;
+  function pomoTick() {
+    if (!pomo) return;
+    var left = Math.max(0, Math.round((pomo.endsAt - Date.now()) / 1000));
+    if (left === 0) {
+      pomo.phase = pomo.phase === 'focus' ? 'break' : 'focus';
+      pomo.endsAt = Date.now() + (pomo.phase === 'focus' ? 25 : 5) * 60000;
+    }
+    var mm = Math.floor(left / 60), ss = (left % 60 < 10 ? '0' : '') + (left % 60);
+    // update text only — replacing the DOM each tick would yank the stop button mid-tap
+    $('#pomo-phase').textContent = pomo.phase === 'focus' ? 'Focus' : 'Break';
+    $('#pomo-time').textContent = mm + ':' + ss;
+    document.title = mm + ':' + ss + ' · Triage';
+  }
+  function startPomo(label) {
+    stopPomo();
+    pomo = { phase: 'focus', endsAt: Date.now() + 25 * 60000, label: label,
+      timer: setInterval(pomoTick, 500) };
+    $('#pomobar').innerHTML = '<b id="pomo-phase"></b><span id="pomo-time"></span>' +
+      '<span class="pomo-label">' + esc(label) + '</span>' +
+      '<button type="button" id="pomo-stop">stop</button>';
+    $('#pomobar').hidden = false;
+    pomoTick();
+  }
+  function stopPomo() {
+    if (!pomo) return;
+    clearInterval(pomo.timer);
+    pomo = null;
+    $('#pomobar').hidden = true;
+    document.title = 'Triage — adaptive study scheduler';
+  }
+
   var lastTab = null;
   function render() {
     document.querySelectorAll('#tabs button').forEach(function (b) {
@@ -791,6 +892,9 @@ summary::-webkit-details-marker { display: none; }
     if (hit('#day-label')) { cur.offset = 0; render(); return; }
     var chip = hit('#test-topics .chip');
     if (chip) { chip.classList.toggle('on'); return; }
+    var pb = hit('.pomo-btn');
+    if (pb) { startPomo(pb.dataset.label); return; }
+    if (hit('#pomo-stop')) { stopPomo(); return; }
     if (hit('#export-btn')) {
       var blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
       var a = document.createElement('a');

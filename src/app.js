@@ -13,9 +13,21 @@
     var d = new Date(), p = function (x) { return (x < 10 ? '0' : '') + x; };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
+  // known real-world assessments, injected once so they never need manual entry
+  var EVENTS = [
+    { id: 'evt-phys-test-0825', subjectId: 'phys', date: '2026-08-25', topicIds: [], note: 'Physics test 13:30' },
+    { id: 'evt-eng-io', subjectId: 'eng', date: '2026-08-27', topicIds: ['eng-6', 'eng-7'], note: 'English IO — adjust the date if needed' }
+  ];
   function normalize(s) { // upgrades for states saved by older versions
     if (s.settings.satTarget === 1550) s.settings.satTarget = 1600;
     if (!s.settings.satDeadline) s.settings.satDeadline = '2026-12-18';
+    s.settings.seededEvents = s.settings.seededEvents || [];
+    EVENTS.forEach(function (ev) { // once each; deleting one in the Log tab sticks
+      if (ev.date >= todayISO() && s.settings.seededEvents.indexOf(ev.id) < 0) {
+        s.tests.push(ev);
+        s.settings.seededEvents.push(ev.id);
+      }
+    });
     Seed.SUBJECTS.forEach(function (def) { // subject tunables follow the code, data stays
       var mine = s.subjects.find(function (x) { return x.id === def.id; });
       if (mine) {
@@ -29,9 +41,10 @@
     var s;
     try { s = JSON.parse($('#app-state').textContent); if (s && s.version) return normalize(s); } catch (e) {}
     try { s = JSON.parse(localStorage.getItem(STORE)); if (s && s.version) return normalize(s); } catch (e) {}
-    return Seed.seedState();
+    return normalize(Seed.seedState());
   }
   var state = load();
+  save(); // persist normalization (seeded events, migrated tunables) right away
   var cur = { tab: 'today', offset: 0 };
   function save() {
     var json = JSON.stringify(state).replace(/</g, '\\u003c'); // keep the JSON inert inside its <script> tag
@@ -69,6 +82,8 @@
         ' min</div><div class="b-title">' + esc(b.title) + '</div>' +
         (b.instruction ? '<div class="b-instr">' + esc(b.instruction) + '</div>' : '') +
         (b.reason ? '<div class="b-reason">' + esc(b.reason) + '</div>' : '') +
+        (done || b.kind === 'soccer' || b.kind === 'recall' || b.kind === 'errlog' ? '' :
+          '<button type="button" class="pomo-btn" data-label="' + esc(b.title) + '">▶ pomodoro</button>') +
         (b.kind === 'soccer' ? '' : '<label class="tickwrap"><input type="checkbox" class="tick" data-key="' +
           b.key + '"' + (done ? ' checked' : '') +
           ' aria-label="Done: ' + esc(b.title) + ' at ' + b.time + '"></label>') + '</div>';
@@ -84,9 +99,10 @@
         var w = Engine.subjectWeight(state, s, date);
         tt += w.target; td += w.done;
         var pct = Math.min(100, Math.round(100 * w.done / w.target));
+        var boost = w.remedial + w.prep; // raised target: bad grade and/or upcoming test
         return '<div class="bar-row" data-subject="' + s.id + '"><div class="bar-top"><span>' + esc(s.name) +
-          '</span><span' + (w.remedial > 0 ? ' class="warn"' : '') + '>' + w.done + ' / ' +
-          Math.round(w.target) + ' min' + (w.remedial > 0 ? ' (+' + Math.round(w.remedial) + ')' : '') +
+          '</span><span' + (boost > 0 ? ' class="warn"' : '') + '>' + w.done + ' / ' +
+          Math.round(w.target) + ' min' + (boost > 0 ? ' (+' + Math.round(boost) + ')' : '') +
           '</span></div><div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>';
       }).join('');
     var weektotal = '<div class="weektotal"><b>' + td + '</b> / ' + Math.round(tt) +
@@ -173,6 +189,39 @@
     }).join('');
   }
 
+  // ---- pomodoro: 25 focus / 5 break, visual only, one at a time ----
+  var pomo = null;
+  function pomoTick() {
+    if (!pomo) return;
+    var left = Math.max(0, Math.round((pomo.endsAt - Date.now()) / 1000));
+    if (left === 0) {
+      pomo.phase = pomo.phase === 'focus' ? 'break' : 'focus';
+      pomo.endsAt = Date.now() + (pomo.phase === 'focus' ? 25 : 5) * 60000;
+    }
+    var mm = Math.floor(left / 60), ss = (left % 60 < 10 ? '0' : '') + (left % 60);
+    // update text only — replacing the DOM each tick would yank the stop button mid-tap
+    $('#pomo-phase').textContent = pomo.phase === 'focus' ? 'Focus' : 'Break';
+    $('#pomo-time').textContent = mm + ':' + ss;
+    document.title = mm + ':' + ss + ' · Triage';
+  }
+  function startPomo(label) {
+    stopPomo();
+    pomo = { phase: 'focus', endsAt: Date.now() + 25 * 60000, label: label,
+      timer: setInterval(pomoTick, 500) };
+    $('#pomobar').innerHTML = '<b id="pomo-phase"></b><span id="pomo-time"></span>' +
+      '<span class="pomo-label">' + esc(label) + '</span>' +
+      '<button type="button" id="pomo-stop">stop</button>';
+    $('#pomobar').hidden = false;
+    pomoTick();
+  }
+  function stopPomo() {
+    if (!pomo) return;
+    clearInterval(pomo.timer);
+    pomo = null;
+    $('#pomobar').hidden = true;
+    document.title = 'Triage — adaptive study scheduler';
+  }
+
   var lastTab = null;
   function render() {
     document.querySelectorAll('#tabs button').forEach(function (b) {
@@ -200,6 +249,9 @@
     if (hit('#day-label')) { cur.offset = 0; render(); return; }
     var chip = hit('#test-topics .chip');
     if (chip) { chip.classList.toggle('on'); return; }
+    var pb = hit('.pomo-btn');
+    if (pb) { startPomo(pb.dataset.label); return; }
+    if (hit('#pomo-stop')) { stopPomo(); return; }
     if (hit('#export-btn')) {
       var blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
       var a = document.createElement('a');

@@ -51,16 +51,29 @@ t('Mon/Wed are soccer days', () => {
   assert.strictEqual(shape(Engine.buildDay(fresh(), MON)), want);
   assert.strictEqual(shape(Engine.buildDay(fresh(), WED)), want);
 });
-t('Tue/Thu/Fri template', () => {
-  const want = 'recall@15:50/10 flex@16:00/90 flex@17:50/70 flex@19:45/60 errlog@20:45/20';
+t('Tue/Thu/Fri template ends with the PeakScore half hour', () => {
+  const want = 'recall@15:50/10 flex@16:00/90 flex@17:50/70 flex@19:45/60 peak@20:45/30 errlog@21:15/20';
   [TUE, THU, FRI].forEach(d => assert.strictEqual(shape(Engine.buildDay(fresh(), d)), want));
 });
-t('Saturday: timed test + morning and afternoon flex (get-ahead day)', () => {
-  assert.strictEqual(shape(Engine.buildDay(fresh(), SAT)), 'test@08:00/135 flex@10:45/100 flex@14:00/120');
+t('Saturday: timed test + flex + PeakScore half hour', () => {
+  assert.strictEqual(shape(Engine.buildDay(fresh(), SAT)),
+    'test@08:00/135 flex@10:45/100 flex@14:00/120 peak@16:15/30');
 });
-t('Sunday: autopsy + review + afternoon flex (get-ahead day)', () => {
+t('Sunday: autopsy + review + flex + PeakScore half hour', () => {
   assert.strictEqual(shape(Engine.buildDay(fresh(), SUN)),
-    'autopsy@09:00/120 review@11:00/60 flex@14:00/90 flex@16:30/60');
+    'autopsy@09:00/120 review@11:00/60 flex@14:00/90 flex@16:30/60 peak@17:45/30');
+});
+t('PeakScore is a fixed 30-minute ritual — school owns the flex', () => {
+  const s = fresh();
+  assert.strictEqual(subj(s, 'peak').weeklyMinutes, 150);
+  const day = Engine.buildDay(s, TUE);
+  const pk = day.filter(b => b.subjectId === 'peak');
+  assert.strictEqual(pk.length, 1);
+  assert.strictEqual(pk[0].minutes, 30);
+  assert.ok(pk[0].topicId, 'peak block rotates its workstreams');
+  assert.ok(!flexOf(day).some(b => b.subjectId === 'peak'), 'peak never competes for flex');
+  assert.ok(!Engine.buildDay(s, MON).some(b => b.subjectId === 'peak'), 'soccer days skip peak');
+  assert.ok(!Engine.allocationPool(s, TUE).map(x => x.id).includes('peak'));
 });
 t('floor mode: exactly three blocks totalling 25 minutes', () => {
   const s = fresh(); s.settings.floorMode = true;
@@ -97,17 +110,51 @@ t('remedial caps at 180 and gradeMult at 2.6', () => {
   assert.strictEqual(w.remedial, 180);
   assert.strictEqual(w.gradeMult, 2.6);
 });
-t('test multiplier tiers by days-until-test', () => {
-  const expect = [[0, 3.0], [2, 3.0], [3, 2.2], [5, 2.2], [6, 1.6], [10, 1.6], [11, 1.25], [14, 1.25], [15, 1]];
+t('test multiplier tiers by days-until-test (day-of gets none: the test is sat)', () => {
+  const expect = [[0, 1], [1, 3.0], [2, 3.0], [3, 2.2], [5, 2.2], [6, 1.6], [10, 1.6], [11, 1.25], [14, 1.25], [15, 1]];
   expect.forEach(([dt, m]) => {
     const s = fresh();
     s.tests.push({ id: 't1', subjectId: 'phys', date: Engine.addDays(TUE, dt), topicIds: [], note: '' });
     approx(Engine.subjectWeight(s, subj(s, 'phys'), TUE).testMult, m, 1e-9);
   });
 });
+t('an upcoming test adds prep minutes to the target, not just weight', () => {
+  const s = fresh();
+  s.tests.push({ id: 't1', subjectId: 'phys', date: THU, topicIds: [], note: '' });
+  const w = Engine.subjectWeight(s, subj(s, 'phys'), TUE);
+  assert.strictEqual(w.prep, 180);
+  assert.strictEqual(w.target, 180 + 180);
+  const dayOf = Engine.subjectWeight(s, subj(s, 'phys'), THU); // prep window is over
+  assert.strictEqual(dayOf.prep, 0);
+  assert.strictEqual(dayOf.testMult, 1);
+});
+t('a test sat this morning does not shadow the next one', () => {
+  const s = fresh();
+  s.tests.push({ id: 'a', subjectId: 'phys', date: TUE, topicIds: [], note: 'sat today 13:30' });
+  s.tests.push({ id: 'b', subjectId: 'phys', date: THU, topicIds: [], note: '' });
+  const w = Engine.subjectWeight(s, subj(s, 'phys'), TUE);
+  assert.strictEqual(w.testDt, 2);
+  assert.strictEqual(w.testMult, 3.0);
+  assert.strictEqual(w.prep, 180);
+});
+t('weekend attention: math ≈ phys on top, then econ, chem last', () => {
+  const s = fresh();
+  approx(Engine.subjectWeight(s, subj(s, 'math'), SAT).wkndMult, 1.35, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'phys'), SUN).wkndMult, 1.35, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'econ'), SAT).wkndMult, 1.3, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'chem'), SAT).wkndMult, 1, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'math'), TUE).wkndMult, 1, 1e-9); // weekdays untouched
+  [SAT, SUN].forEach(d => Engine.buildDay(s, d).forEach(b => {
+    if (b.subjectId && (b.kind === 'flex' || b.kind === 'test' || b.kind === 'peak')) Engine.tickBlock(s, b);
+  }));
+  const wk = id => s.log.filter(e => e.subjectId === id).reduce((a, e) => a + e.minutes, 0);
+  assert.ok(wk('math') >= 90 && wk('phys') >= 90, 'both top HLs get deep work: ' + wk('math') + '/' + wk('phys'));
+  assert.ok(Math.min(wk('math'), wk('phys')) > wk('econ'), 'math & phys above econ');
+  assert.ok(wk('econ') > wk('chem'), 'econ above chem at the weekend: ' + wk('econ') + ' vs ' + wk('chem'));
+});
 t('combined multiplier caps at 3.5', () => {
   const s = fresh();
-  s.tests.push({ id: 't1', subjectId: 'math', date: TUE, topicIds: [], note: '' });
+  s.tests.push({ id: 't1', subjectId: 'math', date: WED, topicIds: [], note: '' });
   for (let i = 0; i < 4; i++) s.grades.push({ id: 'g' + i, subjectId: 'math', date: TUE, score: 1, note: '' });
   assert.strictEqual(Engine.subjectWeight(s, subj(s, 'math'), TUE).mult, 3.5);
 });
@@ -126,15 +173,26 @@ t('Tier 3 locked out while any Tier 1 subject is >40% behind', () => {
   assert.ok(!ids.includes('eng') && !ids.includes('port'));
   assert.ok(!Engine.buildDay(s, MON).some(b => b.subjectId === 'eng' || b.subjectId === 'port'));
   // feed Tier 1 to exactly 60% of target -> deficit is exactly 40%, no longer >40%
-  addLog(s, MON, 'math', 126); addLog(s, MON, 'phys', 108); addLog(s, MON, 'econ', 63); addLog(s, MON, 'peak', 180);
+  addLog(s, MON, 'math', 126); addLog(s, MON, 'phys', 108); addLog(s, MON, 'econ', 63); addLog(s, MON, 'peak', 90);
   assert.strictEqual(Engine.tier3Locked(s, TUE), false);
   assert.ok(Engine.allocationPool(s, TUE).map(x => x.id).includes('eng'));
   s.log = s.log.filter(e => e.subjectId !== 'math'); addLog(s, MON, 'math', 125);
   assert.strictEqual(Engine.tier3Locked(s, TUE), true);
 });
+t('an imminent oral unlocks a Tier 3 subject through the ladder', () => {
+  const s = fresh();
+  s.tests.push({ id: 't1', subjectId: 'eng', date: THU, topicIds: ['eng-6', 'eng-7'], note: 'IO' });
+  const ids = Engine.allocationPool(s, TUE).map(x => x.id);
+  assert.ok(ids.includes('eng'), 'English must escape the lockout');
+  assert.ok(!ids.includes('port'), 'Portuguese stays locked');
+  const flex = flexOf(Engine.buildDay(s, TUE));
+  assert.strictEqual(flex[0].subjectId, 'eng', 'IO prep owns the freshest block, got ' + flex.map(b => b.subjectId));
+  assert.strictEqual(flex[0].topicId, 'eng-6');
+  assert.ok(flex[0].reason.includes('test in 2d'), flex[0].reason);
+});
 t('Tier 3 actually gets scheduled once everything above it is fed', () => {
   const s = fresh();
-  [['math', 210], ['phys', 180], ['econ', 105], ['peak', 300], ['chem', 140], ['sat', 240]]
+  [['math', 210], ['phys', 180], ['econ', 105], ['peak', 150], ['chem', 140], ['sat', 240]]
     .forEach(([id, m]) => addLog(s, MON, id, m));
   const got = Engine.buildDay(s, TUE).map(b => b.subjectId);
   assert.ok(got.includes('eng'), 'expected an English block, got ' + got.join(','));
@@ -166,14 +224,24 @@ t('PeakScore and the SAT survive a full simulated week', () => {
   const s = fresh();
   [MON, TUE, WED, THU, FRI, SAT, SUN].forEach(d => {
     Engine.buildDay(s, d).forEach(b => {
-      if (b.subjectId && (b.kind === 'flex' || b.kind === 'test')) Engine.tickBlock(s, b);
+      if (b.subjectId && (b.kind === 'flex' || b.kind === 'test' || b.kind === 'peak')) Engine.tickBlock(s, b);
     });
   });
   const total = id => s.log.filter(e => e.subjectId === id).reduce((a, e) => a + e.minutes, 0);
-  assert.ok(total('peak') >= 200, 'peak got ' + total('peak'));
+  assert.strictEqual(total('peak'), 150, 'peak is exactly its five half hours, got ' + total('peak'));
   assert.ok(total('sat') >= 150, 'sat got ' + total('sat'));
   assert.ok(total('chem') >= 90, 'chem got ' + total('chem'));
   ['math', 'phys', 'econ'].forEach(id => assert.ok(total(id) >= 60, id + ' got ' + total(id)));
+});
+
+t('a nearly-fed subject stops absorbing surplus once its need is planned', () => {
+  const s = fresh();
+  [['math', 210], ['phys', 180], ['econ', 105], ['peak', 150], ['chem', 140], ['sat', 240], ['eng', 45]]
+    .forEach(([id, m]) => addLog(s, MON, id, m)); // everything fed except Portuguese's 30 min
+  const flex = flexOf(Engine.buildDay(s, SUN));
+  const port = flex.filter(b => b.subjectId === 'port');
+  assert.strictEqual(port.length, 1,
+    'port takes one block for its 30 minutes, not the whole afternoon: ' + flex.map(b => b.subjectId));
 });
 
 // ---- chemistry priority ----
@@ -248,6 +316,14 @@ t('instructions vary by status and subject', () => {
   assert.ok(/timed|criteria/i.test(Engine.instructionFor('eng', 'solid')));
   assert.ok(/crit[ée]rios|cronometrad/i.test(Engine.instructionFor('port', 'new')));
   assert.notStrictEqual(Engine.instructionFor('peak', 'new'), Engine.instructionFor('math', 'new'));
+});
+t('oral topics get oral-specific instructions', () => {
+  assert.ok(/record|criteria/i.test(
+    Engine.instructionFor('eng', 'learning', 'Individual Oral: 10-minute delivery practice')));
+  assert.ok(/grave|crit/i.test(
+    Engine.instructionFor('port', 'new', 'Oral Individual: prática de apresentação')));
+  assert.strictEqual(Engine.instructionFor('eng', 'learning', 'Paper 1: thesis & structure under time'),
+    Engine.instructionFor('eng', 'learning'));
 });
 
 // ---- Saturday test block & satDone ----
