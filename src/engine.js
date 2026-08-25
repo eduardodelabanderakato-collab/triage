@@ -71,6 +71,7 @@
 
     var sd = schoolDay(dateISO); // consolidate what was taught in class today
     var classMult = sd && CLASS_DAYS[sd].indexOf(subject.id) >= 0 ? 1.2 : 1;
+    var effWeight = TIER_W[subject.tier] * (subject.priority || 1); // e.g. chem: 0.72 × 1.25
     var target = subject.weeklyMinutes + remedial;
     var done = minutesThisWeek(state, subject.id, dateISO);
     var remaining = Math.max(0, target - done);
@@ -78,8 +79,8 @@
     return {
       remedial: remedial, target: target, done: done, remaining: remaining,
       testMult: testMult, gradeMult: gradeMult, shakyMult: shakyMult, testDt: testDt,
-      classMult: classMult, mult: mult,
-      score: (remaining / 60 + 0.1) * mult * TIER_W[subject.tier] * classMult
+      classMult: classMult, mult: mult, effWeight: effWeight,
+      score: (remaining / 60 + 0.1) * mult * effWeight * classMult
     };
   }
 
@@ -121,12 +122,15 @@
       { time: '17:50', minutes: 70, kind: 'flex' },
       { time: '19:45', minutes: 60, kind: 'flex' },
       { time: '20:45', minutes: 20, kind: 'errlog' }];
-    if (d === 5) return [
+    if (d === 5) return [ // weekends are the chance to get ahead
       { time: '08:00', minutes: 135, kind: 'test' },
+      { time: '10:45', minutes: 100, kind: 'flex' },
       { time: '14:00', minutes: 120, kind: 'flex' }];
     return [
       { time: '09:00', minutes: 120, kind: 'autopsy' },
-      { time: '11:00', minutes: 60, kind: 'review' }];
+      { time: '11:00', minutes: 60, kind: 'review' },
+      { time: '14:00', minutes: 90, kind: 'flex' },
+      { time: '16:30', minutes: 60, kind: 'flex' }];
   }
 
   // ---- topic choice ----
@@ -221,7 +225,16 @@
     var addPlan = function (id, min) { planned[id] = (planned[id] || 0) + min; };
 
     blocks.forEach(function (b) {
-      if (FIXED[b.kind]) { b.title = FIXED[b.kind][0]; b.instruction = FIXED[b.kind][1]; return; }
+      if (FIXED[b.kind]) {
+        b.title = FIXED[b.kind][0]; b.instruction = FIXED[b.kind][1];
+        if (b.kind === 'recall') { // name yesterday's classes, if there were any
+          var ysd = schoolDay(addDays(dateISO, -1));
+          if (ysd) b.instruction = 'Yesterday was Day ' + ysd + ' — rebuild ' +
+            CLASS_DAYS[ysd].map(function (id) { return byId[id] ? byId[id].name : id; }).join(', ') +
+            ' from memory, then check your notes.';
+        }
+        return;
+      }
       if (b.kind !== 'test') return;
       var pin = logByKey[b.key];
       if (pin && pin.subjectId) { b.subjectId = pin.subjectId; b.done = true; }

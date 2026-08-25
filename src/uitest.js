@@ -1,5 +1,5 @@
 /* uitest.js — Playwright browser tests against the built index.html. Run: node src/uitest.js */
-const http = require('http'), fs = require('fs'), path = require('path');
+const http = require('http'), fs = require('fs'), path = require('path'), os = require('os');
 const { chromium } = require('playwright');
 
 const HTML = path.join(__dirname, '..', 'index.html');
@@ -37,6 +37,8 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
     await page.waitForSelector('.block');
     ok((await page.locator('#tabs button').count()) === 3, 'three tabs');
     ok(/1600/.test(await page.locator('.goalbar').innerText()), 'SAT 1600 goal line visible');
+    ok(/\d+\/\d+ done/.test(await page.locator('.daysum').innerText()), 'day summary line');
+    ok(/min/.test(await page.locator('#bars .weektotal').innerText()), 'weekly pace line');
     ok(errors.length === 0, 'console errors: ' + errors.join(' | '));
   });
 
@@ -115,6 +117,7 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
     await page.locator('#test-topics .chip').nth(1).click();
     await page.click('#test-form button[type="submit"]');
     await page.waitForSelector('.test-item');
+    ok(/in 2d/.test(await page.locator('.test-item .chip-dt').first().innerText()), 'countdown chip');
     await page.click('[data-tab="today"]');
     await gotoWeekday();
     const first = await page.locator('.block.kind-flex .b-title').first().innerText();
@@ -144,6 +147,28 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
     await page.click('[data-tab="log"]');
     ok(await page.locator('.grade-item').count() >= 1, 'grade survived');
     ok(await page.locator('.test-item').count() >= 1, 'test survived');
+  });
+
+  await t('export downloads a backup and import restores it', async () => {
+    await page.click('[data-tab="log"]');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#export-btn')]);
+    const file = path.join(os.tmpdir(), 'triage-backup-uitest.json');
+    await download.saveAs(file);
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    ok(data.version === 1 && data.subjects.length === 8, 'backup holds full state');
+    data.grades.push({ id: 'gx', subjectId: 'econ', date: '2026-08-20', score: 5, note: 'imported-marker' });
+    const chem = data.subjects.find(s => s.id === 'chem'); // stale pre-priority backup
+    chem.weeklyMinutes = 100; delete chem.priority;
+    fs.writeFileSync(file, JSON.stringify(data));
+    page.once('dialog', d => d.accept());
+    await page.setInputFiles('#import-file', file);
+    await page.waitForSelector('.grade-item');
+    ok((await page.locator('#grade-list').innerText()).includes('imported-marker'), 'import applied');
+    const migrated = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('triage-state-v1')).subjects.find(s => s.id === 'chem'));
+    ok(migrated.weeklyMinutes === 140 && migrated.priority === 1.25,
+      'old states are migrated to the current chem budget, got ' + JSON.stringify(migrated));
+    fs.unlinkSync(file);
   });
 
   await t('dark and light themes resolve to the right colours', async () => {

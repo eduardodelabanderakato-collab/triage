@@ -55,11 +55,12 @@ t('Tue/Thu/Fri template', () => {
   const want = 'recall@15:50/10 flex@16:00/90 flex@17:50/70 flex@19:45/60 errlog@20:45/20';
   [TUE, THU, FRI].forEach(d => assert.strictEqual(shape(Engine.buildDay(fresh(), d)), want));
 });
-t('Saturday: timed test + afternoon flex', () => {
-  assert.strictEqual(shape(Engine.buildDay(fresh(), SAT)), 'test@08:00/135 flex@14:00/120');
+t('Saturday: timed test + morning and afternoon flex (get-ahead day)', () => {
+  assert.strictEqual(shape(Engine.buildDay(fresh(), SAT)), 'test@08:00/135 flex@10:45/100 flex@14:00/120');
 });
-t('Sunday: autopsy + weekly review', () => {
-  assert.strictEqual(shape(Engine.buildDay(fresh(), SUN)), 'autopsy@09:00/120 review@11:00/60');
+t('Sunday: autopsy + review + afternoon flex (get-ahead day)', () => {
+  assert.strictEqual(shape(Engine.buildDay(fresh(), SUN)),
+    'autopsy@09:00/120 review@11:00/60 flex@14:00/90 flex@16:30/60');
 });
 t('floor mode: exactly three blocks totalling 25 minutes', () => {
   const s = fresh(); s.settings.floorMode = true;
@@ -77,7 +78,7 @@ t('remedial minutes raise the weekly target (grade 4 in Chemistry)', () => {
   s.grades.push({ id: 'g1', subjectId: 'chem', date: MON, score: 4, note: '' });
   const w = Engine.subjectWeight(s, subj(s, 'chem'), TUE);
   approx(w.remedial, 30 * 3 * (1 - 1 / 21), 1e-6);
-  approx(w.target, 100 + 30 * 3 * (1 - 1 / 21), 1e-6);
+  approx(w.target, subj(s, 'chem').weeklyMinutes + 30 * 3 * (1 - 1 / 21), 1e-6);
   approx(w.gradeMult, 1 + 0.22 * 3 * (1 - 1 / 21), 1e-6);
 });
 t('grade influence decays to zero at 21 days', () => {
@@ -133,7 +134,7 @@ t('Tier 3 locked out while any Tier 1 subject is >40% behind', () => {
 });
 t('Tier 3 actually gets scheduled once everything above it is fed', () => {
   const s = fresh();
-  [['math', 210], ['phys', 180], ['econ', 105], ['peak', 300], ['chem', 100], ['sat', 240]]
+  [['math', 210], ['phys', 180], ['econ', 105], ['peak', 300], ['chem', 140], ['sat', 240]]
     .forEach(([id, m]) => addLog(s, MON, id, m));
   const got = Engine.buildDay(s, TUE).map(b => b.subjectId);
   assert.ok(got.includes('eng'), 'expected an English block, got ' + got.join(','));
@@ -171,7 +172,20 @@ t('PeakScore and the SAT survive a full simulated week', () => {
   const total = id => s.log.filter(e => e.subjectId === id).reduce((a, e) => a + e.minutes, 0);
   assert.ok(total('peak') >= 200, 'peak got ' + total('peak'));
   assert.ok(total('sat') >= 150, 'sat got ' + total('sat'));
+  assert.ok(total('chem') >= 90, 'chem got ' + total('chem'));
   ['math', 'phys', 'econ'].forEach(id => assert.ok(total(id) >= 60, id + ' got ' + total(id)));
+});
+
+// ---- chemistry priority ----
+t('Chemistry runs hotter than Tier 2 but still below Physics', () => {
+  const s = fresh();
+  assert.strictEqual(subj(s, 'chem').weeklyMinutes, 140);
+  const chem = Engine.subjectWeight(s, subj(s, 'chem'), TUE);
+  const phys = Engine.subjectWeight(s, subj(s, 'phys'), TUE);
+  approx(chem.effWeight, 0.9, 1e-9);  // 0.72 tier weight × 1.25 priority
+  approx(phys.effWeight, 1, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'sat'), TUE).effWeight, 0.72, 1e-9);
+  assert.ok(chem.score < phys.score, 'chem must stay below physics');
 });
 
 // ---- Day 1 / Day 2 rotation ----
@@ -194,6 +208,13 @@ t('subjects met in class today get the consolidation boost', () => {
   assert.strictEqual(flexOf(Engine.buildDay(s, TUE))[0].subjectId, 'phys');
   assert.strictEqual(flexOf(Engine.buildDay(s, MON))[0].subjectId, 'math');
 });
+t('the recall sprint names yesterday’s classes', () => {
+  const rTue = Engine.buildDay(fresh(), TUE)[0]; // Monday was a Day 1
+  assert.ok(/Day 1/.test(rTue.instruction), rTue.instruction);
+  assert.ok(/Math AA HL/.test(rTue.instruction) && /Economics HL/.test(rTue.instruction), rTue.instruction);
+  const rMon = Engine.buildDay(fresh(), MON)[0]; // Sunday had no classes
+  assert.ok(!/Day [12]/.test(rMon.instruction), rMon.instruction);
+});
 
 // ---- topics ----
 t('topic picker: test-named first, then shaky > learning > new > solid past review', () => {
@@ -213,7 +234,7 @@ t('no topic repeats within a day', () => {
   const s = fresh();
   s.tests.push({ id: 't1', subjectId: 'phys', date: THU, topicIds: ['phys-1'], note: '' });
   s.grades.push({ id: 'g1', subjectId: 'chem', date: MON, score: 3, note: '' });
-  [MON, TUE, WED, THU, FRI, SAT].forEach(d => {
+  [MON, TUE, WED, THU, FRI, SAT, SUN].forEach(d => {
     const ids = Engine.buildDay(s, d).filter(b => b.topicId).map(b => b.topicId);
     assert.strictEqual(new Set(ids).size, ids.length, 'duplicate topic on ' + d);
   });

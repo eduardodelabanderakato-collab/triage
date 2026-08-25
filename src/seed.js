@@ -9,7 +9,7 @@
     { id: 'phys', name: 'Physics HL',      level: 'HL', tier: 1, weeklyMinutes: 180, quota: 180, sources: ['RV Gold'] },
     { id: 'econ', name: 'Economics HL',    level: 'HL', tier: 1, weeklyMinutes: 105, quota: 105, sources: ['RV Gold'] },
     { id: 'peak', name: 'PeakScore',       level: '—',  tier: 1, weeklyMinutes: 300, quota: 300, sources: [] },
-    { id: 'chem', name: 'Chemistry SL',    level: 'SL', tier: 2, weeklyMinutes: 100, quota: 100, sources: ['RV Gold'] },
+    { id: 'chem', name: 'Chemistry SL',    level: 'SL', tier: 2, weeklyMinutes: 140, quota: 140, priority: 1.25, sources: ['RV Gold'] },
     { id: 'sat',  name: 'SAT',             level: '—',  tier: 2, weeklyMinutes: 240, quota: 240, sources: ['Bluebook', 'Erica Meltzer'] },
     { id: 'eng',  name: 'English A SL',    level: 'SL', tier: 3, weeklyMinutes: 45,  quota: 45,  sources: [] },
     { id: 'port', name: 'Portuguese A SL', level: 'SL', tier: 3, weeklyMinutes: 30,  quota: 30,  sources: [] }

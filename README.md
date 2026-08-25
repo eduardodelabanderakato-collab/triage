@@ -14,15 +14,15 @@ No backend, no accounts, no framework, no build step for the user. Open
 |------|----------|-----------|
 | 0 | Sleep, soccer, meals, one social block/week | Never scheduled against. Not in the allocation pool. |
 | 1 | Math AA HL, Physics HL, Economics HL, PeakScore | Full weight. Never cut. |
-| 2 | Chemistry SL, SAT | Weight ×0.72. Cut when the week is tight. |
+| 2 | Chemistry SL, SAT | Weight ×0.72. Cut when the week is tight. Chemistry carries a ×1.25 priority (effective ≈0.9) — below Physics, above the rest of the tier. |
 | 3 | English SL, Portuguese SL | Weight ×0.45. Locked out entirely while **any** Tier 1 subject is >40% behind its weekly target. |
 
 ## How a day is planned
 
 1. **Template** — fixed by weekday: Mon/Wed are soccer days (flex 45+90+45), Tue/Thu/Fri
-   run flex 90+70+60, Saturday is a 135-min timed full test + 120-min flex, Sunday is a
-   120-min error autopsy + 60-min weekly review. Floor mode replaces everything with
-   three blocks totalling 25 minutes.
+   run flex 90+70+60. Weekends are the get-ahead days: Saturday is a 135-min timed full
+   test + flex 100+120, Sunday a 120-min error autopsy + 60-min weekly review + flex
+   90+60. Floor mode replaces everything with three blocks totalling 25 minutes.
 2. **Weight each subject** (`subjectWeight` in [src/engine.js](src/engine.js)):
 
    ```
@@ -34,8 +34,10 @@ No backend, no accounts, no framework, no build step for the user. Open
    shakyMult = 1 + 0.5·(shaky topics / total topics)
    classMult = 1.2 if the subject met in school today (Day 1/Day 2), else 1
    mult      = min(3.5, testMult · gradeMult · shakyMult)
-   score     = (remaining/60 + 0.1) · mult · tierWeight · classMult
+   score     = (remaining/60 + 0.1) · mult · tierWeight · priority · classMult
    ```
+   `priority` is an optional per-subject multiplier on the tier weight (only Chemistry
+   uses it today, ×1.25).
 3. **Placement** — `PLACEMENT` in engine.js interpolates from first to last flex block:
    analytical subjects (math/phys/chem) ×1.35→×0.75, project work (PeakScore/SAT)
    ×0.60→×1.40. Hard problem-solving gets the freshest hour. *Test-eve exception:* ≤2
@@ -67,8 +69,9 @@ resets the rotation, change that one constant. Class lists live in `CLASS_DAYS`.
 ## Retuning
 
 - **Weekly minute budgets** — `SUBJECTS` in [src/seed.js](src/seed.js)
-  (`weeklyMinutes`). Current: Math 210 · Physics 180 · Econ 105 · PeakScore 300 ·
-  Chem 100 · SAT 240 · English 45 · Portuguese 30.
+  (`weeklyMinutes`, optional `priority`). Current: Math 210 · Physics 180 · Econ 105 ·
+  PeakScore 300 · Chem 140 · SAT 240 · English 45 · Portuguese 30. Subject tunables are
+  re-read from the seed on every load, so retuning them updates existing devices too.
 - **Time-of-day bias** — `PLACEMENT` in engine.js.
 - **Day templates** — `template()` in engine.js.
 - **Tier weights** — `TIER_W` in engine.js.
@@ -83,7 +86,9 @@ After any change: `node src/build.js` regenerates index.html, and run the tests.
 State lives in localStorage (`triage-state-v1`) and is mirrored into the
 `<script type="application/json" id="app-state">` tag (with `<` escaped so the JSON
 can't break out of the tag). On load: tag → localStorage → seed. Saving the page from
-the browser therefore snapshots your data into the file itself.
+the browser therefore snapshots your data into the file itself. There is no sync by
+design — use **Export backup / Import backup** in the Log tab to move data between
+phone and laptop. On a phone, "Add to Home Screen" installs it as a standalone app.
 
 ## Development
 

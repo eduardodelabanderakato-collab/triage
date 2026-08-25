@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14120d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Triage">
 <title>Triage — adaptive study scheduler</title>
 <link rel="icon" href="data:,">
+<link rel="manifest" href='data:application/manifest+json,{"name":"Triage","short_name":"Triage","start_url":".","scope":".","display":"standalone","background_color":"%23ffffff","theme_color":"%23ffd60a"}'>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -67,8 +74,10 @@ h2 { font: 600 12px 'Space Grotesk', Inter, sans-serif; letter-spacing: .12em;
 .daytag { display: inline-block; font: 700 11px 'Space Grotesk', sans-serif; color: var(--accent-ink);
   background: var(--accent); border-radius: 99px; padding: 2px 9px; vertical-align: 2px; }
 .goalbar { text-align: center; font: 600 12.5px 'Space Grotesk', sans-serif;
-  color: var(--muted); letter-spacing: .03em; margin: 0 0 4px; }
+  color: var(--muted); letter-spacing: .03em; margin: 0 0 2px; }
 .goalbar b { color: var(--accent-deep); font-size: 13.5px; }
+.daysum { text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.warn { color: var(--warn); }
 
 .block { position: relative; background: var(--panel); border: 1px solid var(--line);
   border-left: 5px solid var(--sc, var(--line)); border-radius: 14px;
@@ -85,7 +94,12 @@ input.tick { width: 26px; height: 26px; accent-color: var(--accent); }
 .block.kind-soccer, .block.kind-recall, .block.kind-errlog { background: transparent;
   border-style: dashed; border-left-width: 1px; box-shadow: none; }
 .block.kind-soccer .b-title { color: var(--muted); }
+.block.now { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.block.now .b-time { color: var(--accent-deep); }
 
+.weektotal { text-align: center; font-size: 12.5px; color: var(--muted);
+  padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.weektotal b { color: var(--accent-deep); }
 .bar-row { margin: 10px 0; }
 .bar-top { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 4px; }
 .bar-top .warn { color: var(--warn); font-weight: 700; }
@@ -108,6 +122,15 @@ input, select { background: var(--bg); color: var(--ink); border: 1px solid var(
   border-radius: 99px; padding: 7px 12px; margin: 3px 2px; font-size: 12.5px; }
 .chip.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
   font-weight: 600; }
+.chip-dt { font-size: 11px; font-weight: 700; border: 1px solid var(--line);
+  border-radius: 99px; padding: 1px 7px; color: var(--muted); }
+.chip-dt.warn { border-color: var(--warn); }
+.datarow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.filebtn { display: block; text-align: center; border: 2px solid var(--accent);
+  border-radius: 10px; padding: 10px; font: 700 14px 'Space Grotesk', sans-serif;
+  color: var(--accent-deep); cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent-deep); outline-offset: 2px; }
 .item { display: flex; align-items: center; gap: 8px; padding: 9px 2px;
   border-bottom: 1px solid var(--line); font-size: 13.5px; }
 .item:last-child { border-bottom: 0; }
@@ -152,7 +175,7 @@ summary::-webkit-details-marker { display: none; }
     { id: 'phys', name: 'Physics HL',      level: 'HL', tier: 1, weeklyMinutes: 180, quota: 180, sources: ['RV Gold'] },
     { id: 'econ', name: 'Economics HL',    level: 'HL', tier: 1, weeklyMinutes: 105, quota: 105, sources: ['RV Gold'] },
     { id: 'peak', name: 'PeakScore',       level: '—',  tier: 1, weeklyMinutes: 300, quota: 300, sources: [] },
-    { id: 'chem', name: 'Chemistry SL',    level: 'SL', tier: 2, weeklyMinutes: 100, quota: 100, sources: ['RV Gold'] },
+    { id: 'chem', name: 'Chemistry SL',    level: 'SL', tier: 2, weeklyMinutes: 140, quota: 140, priority: 1.25, sources: ['RV Gold'] },
     { id: 'sat',  name: 'SAT',             level: '—',  tier: 2, weeklyMinutes: 240, quota: 240, sources: ['Bluebook', 'Erica Meltzer'] },
     { id: 'eng',  name: 'English A SL',    level: 'SL', tier: 3, weeklyMinutes: 45,  quota: 45,  sources: [] },
     { id: 'port', name: 'Portuguese A SL', level: 'SL', tier: 3, weeklyMinutes: 30,  quota: 30,  sources: [] }
@@ -313,6 +336,7 @@ summary::-webkit-details-marker { display: none; }
 
     var sd = schoolDay(dateISO); // consolidate what was taught in class today
     var classMult = sd && CLASS_DAYS[sd].indexOf(subject.id) >= 0 ? 1.2 : 1;
+    var effWeight = TIER_W[subject.tier] * (subject.priority || 1); // e.g. chem: 0.72 × 1.25
     var target = subject.weeklyMinutes + remedial;
     var done = minutesThisWeek(state, subject.id, dateISO);
     var remaining = Math.max(0, target - done);
@@ -320,8 +344,8 @@ summary::-webkit-details-marker { display: none; }
     return {
       remedial: remedial, target: target, done: done, remaining: remaining,
       testMult: testMult, gradeMult: gradeMult, shakyMult: shakyMult, testDt: testDt,
-      classMult: classMult, mult: mult,
-      score: (remaining / 60 + 0.1) * mult * TIER_W[subject.tier] * classMult
+      classMult: classMult, mult: mult, effWeight: effWeight,
+      score: (remaining / 60 + 0.1) * mult * effWeight * classMult
     };
   }
 
@@ -363,12 +387,15 @@ summary::-webkit-details-marker { display: none; }
       { time: '17:50', minutes: 70, kind: 'flex' },
       { time: '19:45', minutes: 60, kind: 'flex' },
       { time: '20:45', minutes: 20, kind: 'errlog' }];
-    if (d === 5) return [
+    if (d === 5) return [ // weekends are the chance to get ahead
       { time: '08:00', minutes: 135, kind: 'test' },
+      { time: '10:45', minutes: 100, kind: 'flex' },
       { time: '14:00', minutes: 120, kind: 'flex' }];
     return [
       { time: '09:00', minutes: 120, kind: 'autopsy' },
-      { time: '11:00', minutes: 60, kind: 'review' }];
+      { time: '11:00', minutes: 60, kind: 'review' },
+      { time: '14:00', minutes: 90, kind: 'flex' },
+      { time: '16:30', minutes: 60, kind: 'flex' }];
   }
 
   // ---- topic choice ----
@@ -463,7 +490,16 @@ summary::-webkit-details-marker { display: none; }
     var addPlan = function (id, min) { planned[id] = (planned[id] || 0) + min; };
 
     blocks.forEach(function (b) {
-      if (FIXED[b.kind]) { b.title = FIXED[b.kind][0]; b.instruction = FIXED[b.kind][1]; return; }
+      if (FIXED[b.kind]) {
+        b.title = FIXED[b.kind][0]; b.instruction = FIXED[b.kind][1];
+        if (b.kind === 'recall') { // name yesterday's classes, if there were any
+          var ysd = schoolDay(addDays(dateISO, -1));
+          if (ysd) b.instruction = 'Yesterday was Day ' + ysd + ' — rebuild ' +
+            CLASS_DAYS[ysd].map(function (id) { return byId[id] ? byId[id].name : id; }).join(', ') +
+            ' from memory, then check your notes.';
+        }
+        return;
+      }
       if (b.kind !== 'test') return;
       var pin = logByKey[b.key];
       if (pin && pin.subjectId) { b.subjectId = pin.subjectId; b.done = true; }
@@ -568,9 +604,16 @@ summary::-webkit-details-marker { display: none; }
     var d = new Date(), p = function (x) { return (x < 10 ? '0' : '') + x; };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
-  function normalize(s) { // one-time upgrades for states saved before the 1600 pledge
+  function normalize(s) { // upgrades for states saved by older versions
     if (s.settings.satTarget === 1550) s.settings.satTarget = 1600;
     if (!s.settings.satDeadline) s.settings.satDeadline = '2026-12-18';
+    Seed.SUBJECTS.forEach(function (def) { // subject tunables follow the code, data stays
+      var mine = s.subjects.find(function (x) { return x.id === def.id; });
+      if (mine) {
+        mine.weeklyMinutes = def.weeklyMinutes; mine.quota = def.quota;
+        mine.priority = def.priority; mine.tier = def.tier;
+      }
+    });
     return s;
   }
   function load() {
@@ -604,27 +647,41 @@ summary::-webkit-details-marker { display: none; }
       (sd ? ' <span class="daytag">Day ' + sd + '</span>' : '');
     var doneKeys = {};
     state.log.forEach(function (e) { doneKeys[e.key] = true; });
-    var blocks = Engine.buildDay(state, date).map(function (b) {
+    var dayBlocks = Engine.buildDay(state, date);
+    var nowM = new Date().getHours() * 60 + new Date().getMinutes();
+    var blocks = dayBlocks.map(function (b) {
       var done = doneKeys[b.key];
-      return '<div class="block kind-' + b.kind + (done ? ' done' : '') + '" data-key="' + b.key +
-        '" data-minutes="' + b.minutes + '"' +
+      var start = +b.time.slice(0, 2) * 60 + +b.time.slice(3);
+      var isNow = cur.offset === 0 && nowM >= start && nowM < start + b.minutes;
+      return '<div class="block kind-' + b.kind + (done ? ' done' : '') + (isNow ? ' now' : '') +
+        '" data-key="' + b.key + '" data-minutes="' + b.minutes + '"' +
         (b.subjectId ? ' data-subject="' + b.subjectId + '"' : '') +
         '><div class="b-time">' + b.time + ' · ' + b.minutes +
         ' min</div><div class="b-title">' + esc(b.title) + '</div>' +
         (b.instruction ? '<div class="b-instr">' + esc(b.instruction) + '</div>' : '') +
         (b.reason ? '<div class="b-reason">' + esc(b.reason) + '</div>' : '') +
         (b.kind === 'soccer' ? '' : '<label class="tickwrap"><input type="checkbox" class="tick" data-key="' +
-          b.key + '"' + (done ? ' checked' : '') + '></label>') + '</div>';
+          b.key + '"' + (done ? ' checked' : '') +
+          ' aria-label="Done: ' + esc(b.title) + ' at ' + b.time + '"></label>') + '</div>';
     }).join('');
+    var tickable = dayBlocks.filter(function (b) { return b.kind !== 'soccer'; });
+    var doneB = tickable.filter(function (b) { return doneKeys[b.key]; });
+    var mins = function (l) { return l.reduce(function (a, b) { return a + b.minutes; }, 0); };
+    var daysum = '<div class="daysum">' + doneB.length + '/' + tickable.length + ' done · ' +
+      mins(doneB) + '/' + mins(tickable) + ' min</div>';
+    var tt = 0, td = 0;
     var bars = state.subjects.filter(function (s) { return !(s.id === 'sat' && state.settings.satDone); })
       .map(function (s) {
         var w = Engine.subjectWeight(state, s, date);
+        tt += w.target; td += w.done;
         var pct = Math.min(100, Math.round(100 * w.done / w.target));
         return '<div class="bar-row" data-subject="' + s.id + '"><div class="bar-top"><span>' + esc(s.name) +
           '</span><span' + (w.remedial > 0 ? ' class="warn"' : '') + '>' + w.done + ' / ' +
           Math.round(w.target) + ' min' + (w.remedial > 0 ? ' (+' + Math.round(w.remedial) + ')' : '') +
           '</span></div><div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>';
       }).join('');
+    var weektotal = '<div class="weektotal"><b>' + td + '</b> / ' + Math.round(tt) +
+      ' min this week · ' + (tt ? Math.min(100, Math.round(100 * td / tt)) : 0) + '%</div>';
     var dl = Engine.daysBetween(todayISO(), state.settings.satDeadline);
     var goal = state.settings.satDone
       ? '<div class="goalbar">SAT <b>done</b> — every hour goes to the <b>45</b></div>'
@@ -632,8 +689,9 @@ summary::-webkit-details-marker { display: none; }
         (dl >= 0 ? ' · <b>' + dl + '</b> days left' : '') + '</div>';
     return '<div class="day-nav"><button id="prev-day" aria-label="previous day">‹</button>' +
       '<div id="day-label" data-date="' + date + '">' + label + '</div>' +
-      '<button id="next-day" aria-label="next day">›</button></div>' + goal + '<div id="blocks">' + blocks +
-      '</div><h2>This week</h2><div id="bars" class="card">' + bars + '</div>';
+      '<button id="next-day" aria-label="next day">›</button></div>' + goal + daysum +
+      '<div id="blocks">' + blocks +
+      '</div><h2>This week</h2><div id="bars" class="card">' + weektotal + bars + '</div>';
   }
 
   var chipsFor = function (subjectId) {
@@ -651,8 +709,10 @@ summary::-webkit-details-marker { display: none; }
       }).join('') || '<div class="empty">No grades logged yet.</div>';
     var tests = state.tests.slice().sort(function (a, b) { return a.date > b.date ? 1 : -1; })
       .map(function (t) {
+        var dt = Engine.daysBetween(today, t.date);
         return '<div class="item test-item"><span class="grow"><b>' + esc(subjName(t.subjectId)) + '</b> ' +
-          t.date + ' · ' + (t.topicIds || []).length + ' topics' +
+          t.date + (dt >= 0 ? ' <span class="chip-dt' + (dt <= 5 ? ' warn' : '') + '">in ' + dt + 'd</span>' : '') +
+          ' · ' + (t.topicIds || []).length + ' topics' +
           (t.note ? ' <span class="note">' + esc(t.note) + '</span>' : '') +
           '</span><button class="del" data-del-test="' + t.id + '">×</button></div>';
       }).join('') || '<div class="empty">No tests coming up.</div>';
@@ -675,7 +735,10 @@ summary::-webkit-details-marker { display: none; }
       '<label><input type="checkbox" id="floor-toggle"' + (state.settings.floorMode ? ' checked' : '') +
       '> Floor mode — a bad day still gets its 25 minutes</label>' +
       '<label><input type="checkbox" id="sat-toggle"' + (state.settings.satDone ? ' checked' : '') +
-      '> SAT done — hand its hours back to the IB</label></div>';
+      '> SAT done — hand its hours back to the IB</label></div>' +
+      '<h2>Data</h2><div class="card datarow">' +
+      '<button class="primary" type="button" id="export-btn">Export backup</button>' +
+      '<label class="filebtn">Import backup<input type="file" id="import-file" accept=".json,application/json" hidden></label></div>';
   }
 
   function renderSubjects(openIds) {
@@ -683,17 +746,25 @@ summary::-webkit-details-marker { display: none; }
       var mine = state.topics.filter(function (t) { return t.subjectId === s.id; });
       var counts = ORDER.map(function (st) {
         var n = mine.filter(function (t) { return t.status === st; }).length;
-        return n ? n + ' ' + st : null;
+        if (!n) return null;
+        return st === 'shaky' ? '<span class="warn">' + n + ' shaky</span>' : n + ' ' + st;
       }).filter(Boolean).join(' · ');
+      var gr = state.grades.filter(function (g) { return g.subjectId === s.id; })
+        .sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 2)
+        .map(function (g) { return g.score; });
+      if (gr.length) counts = 'grades ' + gr.join('·') + ' · ' + counts;
       return '<details class="subject" data-subject="' + s.id + '"' +
         (openIds && openIds.indexOf(s.id) >= 0 ? ' open' : '') + '><summary>' + esc(s.name) +
         '<span class="counts">' + counts + '</span></summary><div class="topics">' +
         mine.map(function (t) {
-          return '<button class="topic st-' + t.status + '" data-topic="' + t.id + '">' + esc(t.name) + '</button>';
+          return '<button class="topic st-' + t.status + '" data-topic="' + t.id +
+            '" aria-label="' + esc(t.name + ' — ' + t.status + ', tap to advance') + '">' +
+            esc(t.name) + '</button>';
         }).join('') + '</div></details>';
     }).join('');
   }
 
+  var lastTab = null;
   function render() {
     document.querySelectorAll('#tabs button').forEach(function (b) {
       b.classList.toggle('active', b.dataset.tab === cur.tab);
@@ -703,6 +774,11 @@ summary::-webkit-details-marker { display: none; }
     });
     $('#view').innerHTML = cur.tab === 'today' ? renderToday()
       : cur.tab === 'log' ? renderLog() : renderSubjects(open);
+    if (cur.tab === 'today' && lastTab !== 'today') { // land on the current block
+      var nb = $('.block.now');
+      if (nb) nb.scrollIntoView({ block: 'center' });
+    }
+    lastTab = cur.tab;
   }
 
   document.addEventListener('click', function (e) {
@@ -715,6 +791,15 @@ summary::-webkit-details-marker { display: none; }
     if (hit('#day-label')) { cur.offset = 0; render(); return; }
     var chip = hit('#test-topics .chip');
     if (chip) { chip.classList.toggle('on'); return; }
+    if (hit('#export-btn')) {
+      var blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'triage-backup-' + todayISO() + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      return;
+    }
     var dg = hit('[data-del-grade]');
     if (dg) {
       state.grades = state.grades.filter(function (g) { return g.id !== dg.dataset.delGrade; });
@@ -745,6 +830,21 @@ summary::-webkit-details-marker { display: none; }
         if (block) Engine.tickBlock(state, block);
       } else if (!el.checked && logged) Engine.untickBlock(state, key);
       save(); render(); return;
+    }
+    if (el.id === 'import-file') {
+      var file = el.files && el.files[0];
+      if (!file) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var s2;
+        try { s2 = JSON.parse(rd.result); } catch (err) { alert('Not a valid backup file.'); return; }
+        if (!s2 || s2.version !== 1) { alert('Not a Triage backup.'); return; }
+        if (!confirm('Replace everything on this device with this backup?')) return;
+        state = normalize(s2);
+        save(); render();
+      };
+      rd.readAsText(file);
+      return;
     }
     if (el.id === 'floor-toggle') { state.settings.floorMode = el.checked; save(); return; }
     if (el.id === 'sat-toggle') { state.settings.satDone = el.checked; save(); return; }

@@ -13,9 +13,16 @@
     var d = new Date(), p = function (x) { return (x < 10 ? '0' : '') + x; };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   }
-  function normalize(s) { // one-time upgrades for states saved before the 1600 pledge
+  function normalize(s) { // upgrades for states saved by older versions
     if (s.settings.satTarget === 1550) s.settings.satTarget = 1600;
     if (!s.settings.satDeadline) s.settings.satDeadline = '2026-12-18';
+    Seed.SUBJECTS.forEach(function (def) { // subject tunables follow the code, data stays
+      var mine = s.subjects.find(function (x) { return x.id === def.id; });
+      if (mine) {
+        mine.weeklyMinutes = def.weeklyMinutes; mine.quota = def.quota;
+        mine.priority = def.priority; mine.tier = def.tier;
+      }
+    });
     return s;
   }
   function load() {
@@ -49,27 +56,41 @@
       (sd ? ' <span class="daytag">Day ' + sd + '</span>' : '');
     var doneKeys = {};
     state.log.forEach(function (e) { doneKeys[e.key] = true; });
-    var blocks = Engine.buildDay(state, date).map(function (b) {
+    var dayBlocks = Engine.buildDay(state, date);
+    var nowM = new Date().getHours() * 60 + new Date().getMinutes();
+    var blocks = dayBlocks.map(function (b) {
       var done = doneKeys[b.key];
-      return '<div class="block kind-' + b.kind + (done ? ' done' : '') + '" data-key="' + b.key +
-        '" data-minutes="' + b.minutes + '"' +
+      var start = +b.time.slice(0, 2) * 60 + +b.time.slice(3);
+      var isNow = cur.offset === 0 && nowM >= start && nowM < start + b.minutes;
+      return '<div class="block kind-' + b.kind + (done ? ' done' : '') + (isNow ? ' now' : '') +
+        '" data-key="' + b.key + '" data-minutes="' + b.minutes + '"' +
         (b.subjectId ? ' data-subject="' + b.subjectId + '"' : '') +
         '><div class="b-time">' + b.time + ' · ' + b.minutes +
         ' min</div><div class="b-title">' + esc(b.title) + '</div>' +
         (b.instruction ? '<div class="b-instr">' + esc(b.instruction) + '</div>' : '') +
         (b.reason ? '<div class="b-reason">' + esc(b.reason) + '</div>' : '') +
         (b.kind === 'soccer' ? '' : '<label class="tickwrap"><input type="checkbox" class="tick" data-key="' +
-          b.key + '"' + (done ? ' checked' : '') + '></label>') + '</div>';
+          b.key + '"' + (done ? ' checked' : '') +
+          ' aria-label="Done: ' + esc(b.title) + ' at ' + b.time + '"></label>') + '</div>';
     }).join('');
+    var tickable = dayBlocks.filter(function (b) { return b.kind !== 'soccer'; });
+    var doneB = tickable.filter(function (b) { return doneKeys[b.key]; });
+    var mins = function (l) { return l.reduce(function (a, b) { return a + b.minutes; }, 0); };
+    var daysum = '<div class="daysum">' + doneB.length + '/' + tickable.length + ' done · ' +
+      mins(doneB) + '/' + mins(tickable) + ' min</div>';
+    var tt = 0, td = 0;
     var bars = state.subjects.filter(function (s) { return !(s.id === 'sat' && state.settings.satDone); })
       .map(function (s) {
         var w = Engine.subjectWeight(state, s, date);
+        tt += w.target; td += w.done;
         var pct = Math.min(100, Math.round(100 * w.done / w.target));
         return '<div class="bar-row" data-subject="' + s.id + '"><div class="bar-top"><span>' + esc(s.name) +
           '</span><span' + (w.remedial > 0 ? ' class="warn"' : '') + '>' + w.done + ' / ' +
           Math.round(w.target) + ' min' + (w.remedial > 0 ? ' (+' + Math.round(w.remedial) + ')' : '') +
           '</span></div><div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div></div>';
       }).join('');
+    var weektotal = '<div class="weektotal"><b>' + td + '</b> / ' + Math.round(tt) +
+      ' min this week · ' + (tt ? Math.min(100, Math.round(100 * td / tt)) : 0) + '%</div>';
     var dl = Engine.daysBetween(todayISO(), state.settings.satDeadline);
     var goal = state.settings.satDone
       ? '<div class="goalbar">SAT <b>done</b> — every hour goes to the <b>45</b></div>'
@@ -77,8 +98,9 @@
         (dl >= 0 ? ' · <b>' + dl + '</b> days left' : '') + '</div>';
     return '<div class="day-nav"><button id="prev-day" aria-label="previous day">‹</button>' +
       '<div id="day-label" data-date="' + date + '">' + label + '</div>' +
-      '<button id="next-day" aria-label="next day">›</button></div>' + goal + '<div id="blocks">' + blocks +
-      '</div><h2>This week</h2><div id="bars" class="card">' + bars + '</div>';
+      '<button id="next-day" aria-label="next day">›</button></div>' + goal + daysum +
+      '<div id="blocks">' + blocks +
+      '</div><h2>This week</h2><div id="bars" class="card">' + weektotal + bars + '</div>';
   }
 
   var chipsFor = function (subjectId) {
@@ -96,8 +118,10 @@
       }).join('') || '<div class="empty">No grades logged yet.</div>';
     var tests = state.tests.slice().sort(function (a, b) { return a.date > b.date ? 1 : -1; })
       .map(function (t) {
+        var dt = Engine.daysBetween(today, t.date);
         return '<div class="item test-item"><span class="grow"><b>' + esc(subjName(t.subjectId)) + '</b> ' +
-          t.date + ' · ' + (t.topicIds || []).length + ' topics' +
+          t.date + (dt >= 0 ? ' <span class="chip-dt' + (dt <= 5 ? ' warn' : '') + '">in ' + dt + 'd</span>' : '') +
+          ' · ' + (t.topicIds || []).length + ' topics' +
           (t.note ? ' <span class="note">' + esc(t.note) + '</span>' : '') +
           '</span><button class="del" data-del-test="' + t.id + '">×</button></div>';
       }).join('') || '<div class="empty">No tests coming up.</div>';
@@ -120,7 +144,10 @@
       '<label><input type="checkbox" id="floor-toggle"' + (state.settings.floorMode ? ' checked' : '') +
       '> Floor mode — a bad day still gets its 25 minutes</label>' +
       '<label><input type="checkbox" id="sat-toggle"' + (state.settings.satDone ? ' checked' : '') +
-      '> SAT done — hand its hours back to the IB</label></div>';
+      '> SAT done — hand its hours back to the IB</label></div>' +
+      '<h2>Data</h2><div class="card datarow">' +
+      '<button class="primary" type="button" id="export-btn">Export backup</button>' +
+      '<label class="filebtn">Import backup<input type="file" id="import-file" accept=".json,application/json" hidden></label></div>';
   }
 
   function renderSubjects(openIds) {
@@ -128,17 +155,25 @@
       var mine = state.topics.filter(function (t) { return t.subjectId === s.id; });
       var counts = ORDER.map(function (st) {
         var n = mine.filter(function (t) { return t.status === st; }).length;
-        return n ? n + ' ' + st : null;
+        if (!n) return null;
+        return st === 'shaky' ? '<span class="warn">' + n + ' shaky</span>' : n + ' ' + st;
       }).filter(Boolean).join(' · ');
+      var gr = state.grades.filter(function (g) { return g.subjectId === s.id; })
+        .sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 2)
+        .map(function (g) { return g.score; });
+      if (gr.length) counts = 'grades ' + gr.join('·') + ' · ' + counts;
       return '<details class="subject" data-subject="' + s.id + '"' +
         (openIds && openIds.indexOf(s.id) >= 0 ? ' open' : '') + '><summary>' + esc(s.name) +
         '<span class="counts">' + counts + '</span></summary><div class="topics">' +
         mine.map(function (t) {
-          return '<button class="topic st-' + t.status + '" data-topic="' + t.id + '">' + esc(t.name) + '</button>';
+          return '<button class="topic st-' + t.status + '" data-topic="' + t.id +
+            '" aria-label="' + esc(t.name + ' — ' + t.status + ', tap to advance') + '">' +
+            esc(t.name) + '</button>';
         }).join('') + '</div></details>';
     }).join('');
   }
 
+  var lastTab = null;
   function render() {
     document.querySelectorAll('#tabs button').forEach(function (b) {
       b.classList.toggle('active', b.dataset.tab === cur.tab);
@@ -148,6 +183,11 @@
     });
     $('#view').innerHTML = cur.tab === 'today' ? renderToday()
       : cur.tab === 'log' ? renderLog() : renderSubjects(open);
+    if (cur.tab === 'today' && lastTab !== 'today') { // land on the current block
+      var nb = $('.block.now');
+      if (nb) nb.scrollIntoView({ block: 'center' });
+    }
+    lastTab = cur.tab;
   }
 
   document.addEventListener('click', function (e) {
@@ -160,6 +200,15 @@
     if (hit('#day-label')) { cur.offset = 0; render(); return; }
     var chip = hit('#test-topics .chip');
     if (chip) { chip.classList.toggle('on'); return; }
+    if (hit('#export-btn')) {
+      var blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'triage-backup-' + todayISO() + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      return;
+    }
     var dg = hit('[data-del-grade]');
     if (dg) {
       state.grades = state.grades.filter(function (g) { return g.id !== dg.dataset.delGrade; });
@@ -190,6 +239,21 @@
         if (block) Engine.tickBlock(state, block);
       } else if (!el.checked && logged) Engine.untickBlock(state, key);
       save(); render(); return;
+    }
+    if (el.id === 'import-file') {
+      var file = el.files && el.files[0];
+      if (!file) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var s2;
+        try { s2 = JSON.parse(rd.result); } catch (err) { alert('Not a valid backup file.'); return; }
+        if (!s2 || s2.version !== 1) { alert('Not a Triage backup.'); return; }
+        if (!confirm('Replace everything on this device with this backup?')) return;
+        state = normalize(s2);
+        save(); render();
+      };
+      rd.readAsText(file);
+      return;
     }
     if (el.id === 'floor-toggle') { state.settings.floorMode = el.checked; save(); return; }
     if (el.id === 'sat-toggle') { state.settings.satDone = el.checked; save(); return; }
