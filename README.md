@@ -36,7 +36,7 @@ No backend, no accounts, no framework, no build step for the user. Open
    gradeMult = 1 + Σ 0.22·(7−score)·(1−age/21), capped at 2.6
    shakyMult = 1 + 0.5·(shaky topics / total topics)
    classMult = 1.2 if the subject met in school today (Day 1/Day 2), else 1
-   wkndMult  = Sat/Sun only: math ×1.35 · physics ×1.35 · econ ×1.3 · chem ×0.8 · else 1
+   wkndMult  = Sat/Sun only: math ×1.45 · physics ×1.45 · econ ×1.15 · chem ×0.8 · else 1
    staleMult = 1 + 0.15·min(7, days since the subject was last studied)   ← nothing starves
    mult      = min(3.5, testMult · gradeMult · shakyMult)
    score     = (remaining/60 + 0.1) · mult · tierWeight · priority · classMult · wkndMult · staleMult
@@ -47,6 +47,10 @@ No backend, no accounts, no framework, no build step for the user. Open
    block, so econ/chem/English/Portuguese surface without waiting for leftovers.
    A test **on its own date** contributes nothing — by the time
    evening blocks start it has been sat, and it never shadows the next upcoming test.
+   **Rescue rule:** from Thursday onward, the day's second flex block is reserved for
+   the top-scoring subject with zero minutes this week, until none remain — a 45 needs
+   all six subjects, so a week must touch every subject (there is a test proving even
+   a lazy week does). The ladder still wins: a week behind pace keeps Tier 3 locked.
    As a day's slots are assigned, `remaining` is re-evaluated minus what's already
    planned, so a nearly-fed subject stops absorbing surplus and free capacity flows
    back up the ladder. The weekend bias orders *outstanding need* (fresh-week weekend:
@@ -87,8 +91,8 @@ resets the rotation, change that one constant. Class lists live in `CLASS_DAYS`.
 ## Retuning
 
 - **Weekly minute budgets** — `SUBJECTS` in [src/seed.js](src/seed.js)
-  (`weeklyMinutes`, optional `priority`). Current: Math 210 · Physics 180 · Econ 105 ·
-  PeakScore 300 · Chem 140 · SAT 240 · English 45 · Portuguese 30. Subject tunables are
+  (`weeklyMinutes`, optional `priority`). Current: Math 210 · Physics 180 · Econ 150 ·
+  Chem 150 · SAT 210 · PeakScore 150 · English 60 · Portuguese 45. Subject tunables are
   re-read from the seed on every load, so retuning them updates existing devices too.
 - **Time-of-day bias** — `PLACEMENT` in engine.js.
 - **Day templates** — `template()` in engine.js.

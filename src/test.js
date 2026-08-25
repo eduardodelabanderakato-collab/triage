@@ -139,9 +139,9 @@ t('a test sat this morning does not shadow the next one', () => {
 });
 t('weekend attention: math ≈ phys on top, then econ, chem last', () => {
   const s = fresh();
-  approx(Engine.subjectWeight(s, subj(s, 'math'), SAT).wkndMult, 1.35, 1e-9);
-  approx(Engine.subjectWeight(s, subj(s, 'phys'), SUN).wkndMult, 1.35, 1e-9);
-  approx(Engine.subjectWeight(s, subj(s, 'econ'), SAT).wkndMult, 1.3, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'math'), SAT).wkndMult, 1.45, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'phys'), SUN).wkndMult, 1.45, 1e-9);
+  approx(Engine.subjectWeight(s, subj(s, 'econ'), SAT).wkndMult, 1.15, 1e-9);
   approx(Engine.subjectWeight(s, subj(s, 'chem'), SAT).wkndMult, 0.8, 1e-9);
   approx(Engine.subjectWeight(s, subj(s, 'math'), TUE).wkndMult, 1, 1e-9); // weekdays untouched
   [SAT, SUN].forEach(d => Engine.buildDay(s, d).forEach(b => {
@@ -172,7 +172,7 @@ t('Tier 3 lockout follows the week’s pace, not the raw weekly target', () => {
   assert.strictEqual(Engine.tier3Locked(s, TUE), true);  // nothing logged Monday → the week is slipping
   assert.ok(!Engine.allocationPool(s, TUE).map(x => x.id).includes('port'));
   // every Tier 1 subject at ≥60% of its pro-rated one-day pace → unlocked again
-  addLog(s, MON, 'math', 18); addLog(s, MON, 'phys', 16); addLog(s, MON, 'econ', 9); addLog(s, MON, 'peak', 13);
+  addLog(s, MON, 'math', 18); addLog(s, MON, 'phys', 16); addLog(s, MON, 'econ', 13); addLog(s, MON, 'peak', 13);
   assert.strictEqual(Engine.tier3Locked(s, TUE), false);
   assert.ok(Engine.allocationPool(s, TUE).map(x => x.id).includes('eng'));
   s.log = s.log.filter(e => e.subjectId !== 'math'); addLog(s, MON, 'math', 17); // just under pace
@@ -185,6 +185,37 @@ t('untouched subjects build pressure until they surface', () => {
   approx(Engine.subjectWeight(s, subj(s, 'econ'), TUE).staleMult, 1.15, 1e-9); // yesterday
   addLog(s, TUE, 'econ', 60);
   approx(Engine.subjectWeight(s, subj(s, 'econ'), TUE).staleMult, 1, 1e-9);    // today
+});
+t('weekly budgets encode the stated priorities', () => {
+  const s = fresh();
+  const wm = id => subj(s, id).weeklyMinutes;
+  assert.deepStrictEqual(
+    [wm('math'), wm('phys'), wm('econ'), wm('chem'), wm('sat'), wm('eng'), wm('port'), wm('peak')],
+    [210, 180, 150, 150, 210, 60, 45, 150]);
+});
+t('rescue rule: from Thursday the second block goes to a still-unfed subject', () => {
+  const s = fresh();
+  // week at pace for Tier 1, everything touched except Portuguese
+  [['math', 100], ['phys', 100], ['econ', 100], ['peak', 90], ['chem', 100], ['sat', 100], ['eng', 60]]
+    .forEach(([id, m]) => addLog(s, MON, id, m));
+  const flex = flexOf(Engine.buildDay(s, THU));
+  assert.strictEqual(flex[1].subjectId, 'port', 'second block rescues the unfed subject, got ' + flex.map(b => b.subjectId));
+  // but the ladder still wins: a slipping week keeps Tier 3 locked, rescue or not
+  assert.ok(!Engine.buildDay(fresh(), THU).some(b => b.subjectId === 'port' || b.subjectId === 'eng'),
+    'no Tier 3 rescue while the week is slipping');
+});
+t('a lazy week (last weekday block always skipped) still touches every subject', () => {
+  const s = fresh();
+  [MON, TUE, WED, THU, FRI, SAT, SUN].forEach(d => {
+    let f = 0;
+    Engine.buildDay(s, d).forEach(b => {
+      if (!b.subjectId || !['flex', 'test', 'peak'].includes(b.kind)) return;
+      if (b.kind === 'flex') { f++; if (f === 3) return; }
+      Engine.tickBlock(s, b);
+    });
+  });
+  const total = id => s.log.filter(e => e.subjectId === id).reduce((a, e) => a + e.minutes, 0);
+  s.subjects.forEach(x => assert.ok(total(x.id) > 0, x.id + ' starved in a partial week'));
 });
 t('nothing starves: a fully-worked week touches every subject', () => {
   const s = fresh();
@@ -208,7 +239,7 @@ t('an imminent oral unlocks a Tier 3 subject through the ladder', () => {
 });
 t('Tier 3 actually gets scheduled once everything above it is fed', () => {
   const s = fresh();
-  [['math', 210], ['phys', 180], ['econ', 105], ['peak', 150], ['chem', 140], ['sat', 240]]
+  [['math', 210], ['phys', 180], ['econ', 150], ['peak', 150], ['chem', 150], ['sat', 210]]
     .forEach(([id, m]) => addLog(s, MON, id, m));
   const got = Engine.buildDay(s, TUE).map(b => b.subjectId);
   assert.ok(got.includes('eng'), 'expected an English block, got ' + got.join(','));
@@ -252,8 +283,8 @@ t('PeakScore and the SAT survive a full simulated week', () => {
 
 t('a nearly-fed subject stops absorbing surplus once its need is planned', () => {
   const s = fresh();
-  [['math', 210], ['phys', 180], ['econ', 105], ['peak', 150], ['chem', 140], ['sat', 240], ['eng', 45]]
-    .forEach(([id, m]) => addLog(s, MON, id, m)); // everything fed except Portuguese's 30 min
+  [['math', 210], ['phys', 180], ['econ', 150], ['peak', 150], ['chem', 150], ['sat', 210], ['eng', 60]]
+    .forEach(([id, m]) => addLog(s, MON, id, m)); // everything fed except Portuguese
   const flex = flexOf(Engine.buildDay(s, SUN));
   const port = flex.filter(b => b.subjectId === 'port');
   assert.strictEqual(port.length, 1,
@@ -263,7 +294,6 @@ t('a nearly-fed subject stops absorbing surplus once its need is planned', () =>
 // ---- chemistry priority ----
 t('Chemistry runs hotter than Tier 2 but still below Physics', () => {
   const s = fresh();
-  assert.strictEqual(subj(s, 'chem').weeklyMinutes, 140);
   const chem = Engine.subjectWeight(s, subj(s, 'chem'), TUE);
   const phys = Engine.subjectWeight(s, subj(s, 'phys'), TUE);
   approx(chem.effWeight, 0.9, 1e-9);  // 0.72 tier weight × 1.25 priority

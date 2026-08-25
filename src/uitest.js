@@ -180,7 +180,7 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
     ok((await page.locator('#grade-list').innerText()).includes('imported-marker'), 'import applied');
     const migrated = await page.evaluate(() =>
       JSON.parse(localStorage.getItem('triage-state-v1')).subjects.find(s => s.id === 'chem'));
-    ok(migrated.weeklyMinutes === 140 && migrated.priority === 1.25,
+    ok(migrated.weeklyMinutes === 150 && migrated.priority === 1.25,
       'old states are migrated to the current chem budget, got ' + JSON.stringify(migrated));
     const ioDate = await page.evaluate(() => {
       const t = JSON.parse(localStorage.getItem('triage-state-v1')).tests.find(x => x.id === 'evt-eng-io');

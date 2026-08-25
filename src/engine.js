@@ -7,7 +7,7 @@
   var TIER_W = { 1: 1, 2: 0.72, 3: 0.45 };
   // weekend deep-work bias: math ≈ physics on top, econ next, chem last
   // (chem keeps its weekday priority; weekends are just not its turn)
-  var WEEKEND_W = { math: 1.35, phys: 1.35, econ: 1.3, chem: 0.8 };
+  var WEEKEND_W = { math: 1.45, phys: 1.45, econ: 1.15, chem: 0.8 };
   var KIND = { math: 'analytical', phys: 'analytical', chem: 'analytical', peak: 'project', sat: 'project' };
   // [multiplier on the first flex block of the day, multiplier on the last]
   var PLACEMENT = { analytical: [1.35, 0.75], project: [0.60, 1.40], neutral: [1, 1] };
@@ -322,24 +322,36 @@
       if (tp) used.add(tp.id);
       addPlan(pin.subjectId, pin.minutes);
     });
+    // rescue rule: from Thursday, subjects with zero minutes this week get the
+    // day's second block before anyone else — a week must touch every subject
+    var unfed = {};
+    if (dow(dateISO) >= 3) pool.forEach(function (s) {
+      if (weights[s.id].done === 0 && weights[s.id].remaining > 0) unfed[s.id] = true;
+    });
     flex.forEach(function (b, i) {
       if (b.done) return;
       var pos = flex.length > 1 ? i / (flex.length - 1) : 0.5;
-      var best = null;
-      pool.forEach(function (s) {
-        var p = planned[s.id] || 0;
-        if (p + b.minutes > DAY_CAP) return;
-        var pl = PLACEMENT[KIND[s.id] || 'neutral'];
-        var place = pl[0] + (pl[1] - pl[0]) * pos;
-        var w = weights[s.id];
-        // test-eve exception: ≤2 days out, urgency overrides the time-of-day penalty
-        if (w.testDt !== null && w.testDt <= 2 && place < 1) place = 1;
-        // need shrinks as today's slots fill, so a fed subject stops absorbing surplus
-        var base = (Math.max(0, w.remaining - p) / 60 + 0.1) *
-          w.mult * w.effWeight * w.classMult * w.wkndMult * w.staleMult;
-        var live = base * place / (1 + p / SPREAD);
-        if (!best || live > best.live) best = { s: s, live: live };
-      });
+      var pickBest = function (onlyUnfed) {
+        var best = null;
+        pool.forEach(function (s) {
+          if (onlyUnfed && !(unfed[s.id] && !planned[s.id])) return;
+          var p = planned[s.id] || 0;
+          if (p + b.minutes > DAY_CAP) return;
+          var pl = PLACEMENT[KIND[s.id] || 'neutral'];
+          var place = pl[0] + (pl[1] - pl[0]) * pos;
+          var w = weights[s.id];
+          // test-eve exception: ≤2 days out, urgency overrides the time-of-day penalty
+          if (w.testDt !== null && w.testDt <= 2 && place < 1) place = 1;
+          // need shrinks as today's slots fill, so a fed subject stops absorbing surplus
+          var base = (Math.max(0, w.remaining - p) / 60 + 0.1) *
+            w.mult * w.effWeight * w.classMult * w.wkndMult * w.staleMult;
+          var live = base * place / (1 + p / SPREAD);
+          if (!best || live > best.live) best = { s: s, live: live };
+        });
+        return best;
+      };
+      var rescue = i === 1 && Object.keys(unfed).some(function (id) { return !planned[id]; });
+      var best = rescue ? (pickBest(true) || pickBest(false)) : pickBest(false);
       if (!best) return;
       var topic = pickTopic(state, best.s.id, dateISO, used);
       if (topic) used.add(topic.id);
