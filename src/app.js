@@ -16,14 +16,16 @@
   // known real-world assessments, injected once so they never need manual entry
   var EVENTS = [
     { id: 'evt-phys-test-0825', subjectId: 'phys', date: '2026-08-25', topicIds: [], note: 'Physics test 13:30' },
-    { id: 'evt-eng-io', subjectId: 'eng', date: '2026-08-27', topicIds: ['eng-6', 'eng-7'], note: 'English IO — adjust the date if needed' }
+    { id: 'evt-eng-io', subjectId: 'eng', date: '2026-08-26', topicIds: ['eng-6', 'eng-7'], note: 'English IO' }
   ];
   function normalize(s) { // upgrades for states saved by older versions
     if (s.settings.satTarget === 1550) s.settings.satTarget = 1600;
     if (!s.settings.satDeadline) s.settings.satDeadline = '2026-12-18';
     s.settings.seededEvents = s.settings.seededEvents || [];
-    EVENTS.forEach(function (ev) { // once each; deleting one in the Log tab sticks
-      if (ev.date >= todayISO() && s.settings.seededEvents.indexOf(ev.id) < 0) {
+    EVENTS.forEach(function (ev) { // injected once; corrections here reach already-seeded devices
+      var got = s.tests.find(function (t) { return t.id === ev.id; });
+      if (got) { got.date = ev.date; got.topicIds = ev.topicIds; got.note = ev.note; }
+      else if (ev.date >= todayISO() && s.settings.seededEvents.indexOf(ev.id) < 0) {
         s.tests.push(ev);
         s.settings.seededEvents.push(ev.id);
       }

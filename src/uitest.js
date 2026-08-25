@@ -171,6 +171,8 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
     data.grades.push({ id: 'gx', subjectId: 'econ', date: '2026-08-20', score: 5, note: 'imported-marker' });
     const chem = data.subjects.find(s => s.id === 'chem'); // stale pre-priority backup
     chem.weeklyMinutes = 100; delete chem.priority;
+    const io = data.tests.find(t => t.id === 'evt-eng-io');
+    if (io) io.date = '2026-08-27'; // stale backup still has the wrong IO date
     fs.writeFileSync(file, JSON.stringify(data));
     page.once('dialog', d => d.accept());
     await page.setInputFiles('#import-file', file);
@@ -180,6 +182,11 @@ const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'
       JSON.parse(localStorage.getItem('triage-state-v1')).subjects.find(s => s.id === 'chem'));
     ok(migrated.weeklyMinutes === 140 && migrated.priority === 1.25,
       'old states are migrated to the current chem budget, got ' + JSON.stringify(migrated));
+    const ioDate = await page.evaluate(() => {
+      const t = JSON.parse(localStorage.getItem('triage-state-v1')).tests.find(x => x.id === 'evt-eng-io');
+      return t && t.date;
+    });
+    ok(ioDate === '2026-08-26', 'seeded events follow the code: IO moved to Wednesday, got ' + ioDate);
     fs.unlinkSync(file);
   });
 

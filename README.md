@@ -16,7 +16,7 @@ No backend, no accounts, no framework, no build step for the user. Open
 | 1 | Math AA HL, Physics HL, Economics HL | Full weight. Never cut. |
 | 1* | PeakScore | A fixed 30-minute daily ritual (Tue/Thu/Fri + both weekend days, skipped on soccer days, 150 min/week). Never competes for flex — school owns those — but still gates Tier 3 like any Tier 1 subject. |
 | 2 | Chemistry SL, SAT | Weight ×0.72. Cut when the week is tight. Chemistry carries a ×1.25 priority (effective ≈0.9) — below Physics, above the rest of the tier. |
-| 3 | English SL, Portuguese SL | Weight ×0.45. Locked out entirely while **any** Tier 1 subject is >40% behind its weekly target — **unless** that subject has an assessment ≤10 days away (an imminent IO beats the ladder). |
+| 3 | English SL, Portuguese SL | Weight ×0.45. Locked out while **any** Tier 1 subject is >40% behind the week's **pace** (pro-rated target) — a slipping week cuts from the bottom, but a normal Monday doesn't blanket-ban them. Exception: a subject with an assessment ≤10 days away (an imminent IO beats the ladder). |
 
 ## How a day is planned
 
@@ -36,12 +36,16 @@ No backend, no accounts, no framework, no build step for the user. Open
    gradeMult = 1 + Σ 0.22·(7−score)·(1−age/21), capped at 2.6
    shakyMult = 1 + 0.5·(shaky topics / total topics)
    classMult = 1.2 if the subject met in school today (Day 1/Day 2), else 1
-   wkndMult  = Sat/Sun only: math ×1.35 · physics ×1.35 · econ ×1.3 · else 1
+   wkndMult  = Sat/Sun only: math ×1.35 · physics ×1.35 · econ ×1.3 · chem ×0.8 · else 1
+   staleMult = 1 + 0.15·min(7, days since the subject was last studied)   ← nothing starves
    mult      = min(3.5, testMult · gradeMult · shakyMult)
-   score     = (remaining/60 + 0.1) · mult · tierWeight · priority · classMult · wkndMult
+   score     = (remaining/60 + 0.1) · mult · tierWeight · priority · classMult · wkndMult · staleMult
    ```
    `priority` is an optional per-subject multiplier on the tier weight (only Chemistry
-   uses it today, ×1.25). A test **on its own date** contributes nothing — by the time
+   uses it today, ×1.25). `staleMult` is why big-budget subjects can't monopolise the
+   week: a subject untouched for days builds pressure (up to ×2.05) until it wins a
+   block, so econ/chem/English/Portuguese surface without waiting for leftovers.
+   A test **on its own date** contributes nothing — by the time
    evening blocks start it has been sat, and it never shadows the next upcoming test.
    As a day's slots are assigned, `remaining` is re-evaluated minus what's already
    planned, so a nearly-fed subject stops absorbing surplus and free capacity flows

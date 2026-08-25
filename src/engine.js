@@ -5,8 +5,9 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 
   var TIER_W = { 1: 1, 2: 0.72, 3: 0.45 };
-  // weekend deep-work bias: math ≈ physics on top, econ next, chem unchanged
-  var WEEKEND_W = { math: 1.35, phys: 1.35, econ: 1.3 };
+  // weekend deep-work bias: math ≈ physics on top, econ next, chem last
+  // (chem keeps its weekday priority; weekends are just not its turn)
+  var WEEKEND_W = { math: 1.35, phys: 1.35, econ: 1.3, chem: 0.8 };
   var KIND = { math: 'analytical', phys: 'analytical', chem: 'analytical', peak: 'project', sat: 'project' };
   // [multiplier on the first flex block of the day, multiplier on the last]
   var PLACEMENT = { analytical: [1.35, 0.75], project: [0.60, 1.40], neutral: [1, 1] };
@@ -54,6 +55,14 @@
     });
     return best;
   }
+  // days since this subject last appeared in the log (capped; never-studied = max)
+  function staleDays(state, subjectId, dateISO) {
+    var last = null;
+    state.log.forEach(function (e) {
+      if (e.subjectId === subjectId && e.date <= dateISO && (!last || e.date > last)) last = e.date;
+    });
+    return last ? Math.min(7, daysBetween(last, dateISO)) : 7;
+  }
   function subjectWeight(state, subject, dateISO) {
     var remedial = 0, gradeMult = 1;
     state.grades.forEach(function (g) {
@@ -84,6 +93,8 @@
     var sd = schoolDay(dateISO); // consolidate what was taught in class today
     var classMult = sd && CLASS_DAYS[sd].indexOf(subject.id) >= 0 ? 1.2 : 1;
     var wkndMult = dow(dateISO) >= 5 ? (WEEKEND_W[subject.id] || 1) : 1;
+    // untouched subjects build pressure, so small-budget subjects still surface
+    var staleMult = 1 + 0.15 * staleDays(state, subject.id, dateISO);
     var effWeight = TIER_W[subject.tier] * (subject.priority || 1); // e.g. chem: 0.72 × 1.25
     var target = subject.weeklyMinutes + remedial + prep; // assessments add minutes, like grades do
     var done = minutesThisWeek(state, subject.id, dateISO);
@@ -92,17 +103,22 @@
     return {
       remedial: remedial, prep: prep, target: target, done: done, remaining: remaining,
       testMult: testMult, gradeMult: gradeMult, shakyMult: shakyMult, testDt: testDt,
-      classMult: classMult, wkndMult: wkndMult, mult: mult, effWeight: effWeight,
-      score: (remaining / 60 + 0.1) * mult * effWeight * classMult * wkndMult
+      classMult: classMult, wkndMult: wkndMult, staleMult: staleMult,
+      mult: mult, effWeight: effWeight,
+      score: (remaining / 60 + 0.1) * mult * effWeight * classMult * wkndMult * staleMult
     };
   }
 
-  // The triage ladder, tier 3 rung: locked out while any tier 1 subject is >40% behind.
+  // The triage ladder, tier 3 rung: locked out while any tier 1 subject is >40%
+  // behind the week's PACE (pro-rated target), so a slipping week cuts from the
+  // bottom but a normal Monday doesn't blanket-ban the small subjects.
   function tier3Locked(state, dateISO) {
+    var frac = dow(dateISO) / 7; // days already elapsed this week
+    if (frac === 0) return false;
     return state.subjects.some(function (s) {
       if (s.tier !== 1) return false;
       var w = subjectWeight(state, s, dateISO);
-      return w.remaining / w.target > 0.4;
+      return w.done < 0.6 * w.target * frac;
     });
   }
 
@@ -220,6 +236,7 @@
     if (w.remedial > 0) r.push('grade below target · +' + Math.round(w.remedial) + ' min');
     if (dow(dateISO) >= 3 && w.remaining / w.target > 0.5) r.push('behind weekly target');
     if (!r.length && topic && topic.status === 'shaky') r.push('shaky topic');
+    if (!r.length && w.staleMult >= 1.6) r.push('untouched ' + Math.round((w.staleMult - 1) / 0.15) + 'd');
     return r.join(' · ');
   }
 
@@ -318,7 +335,8 @@
         // test-eve exception: ≤2 days out, urgency overrides the time-of-day penalty
         if (w.testDt !== null && w.testDt <= 2 && place < 1) place = 1;
         // need shrinks as today's slots fill, so a fed subject stops absorbing surplus
-        var base = (Math.max(0, w.remaining - p) / 60 + 0.1) * w.mult * w.effWeight * w.classMult * w.wkndMult;
+        var base = (Math.max(0, w.remaining - p) / 60 + 0.1) *
+          w.mult * w.effWeight * w.classMult * w.wkndMult * w.staleMult;
         var live = base * place / (1 + p / SPREAD);
         if (!best || live > best.live) best = { s: s, live: live };
       });
