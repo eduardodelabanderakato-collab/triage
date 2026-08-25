@@ -1,0 +1,14 @@
+{
+  "name": "study-scheduler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Adaptive IB/SAT/PeakScore study scheduler — single-file static app",
+  "scripts": {
+    "build": "node src/build.js",
+    "test": "node src/test.js",
+    "uitest": "node src/uitest.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
